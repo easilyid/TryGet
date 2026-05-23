@@ -24,7 +24,7 @@ namespace TryGet.Tests
         [Test]
         public void AttachChild_EstablishesParentChildRelation()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity parent = world.CreateEntity();
             Entity child = world.CreateEntity();
 
@@ -40,7 +40,7 @@ namespace TryGet.Tests
         [Test]
         public void DetachChild_RemovesRelation()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity parent = world.CreateEntity();
             Entity child = world.CreateEntity();
             parent.AttachChild(child);
@@ -58,7 +58,7 @@ namespace TryGet.Tests
         [Test]
         public void DestroyParent_CascadeDestroysChildren()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity parent = world.CreateEntity();
             Entity child = world.CreateEntity();
             Entity grandchild = world.CreateEntity();
@@ -78,7 +78,7 @@ namespace TryGet.Tests
         public void DestroyParent_LeafFirstOnDetachOrder()
         {
             // Issue-08 AC：多层 Ownership 树销毁按叶子优先（深度优先 post-order）执行 Aspect.OnDetach。
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             var log = new List<string>();
 
             Entity root = world.CreateEntity();
@@ -102,7 +102,7 @@ namespace TryGet.Tests
         public void DestroyedEntity_RemovedFromWorldEntityList()
         {
             // Issue-08 AC：级联销毁后 _entities / _entityList 不再包含已销毁的子 Entity。
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity parent = world.CreateEntity();
             Entity child = world.CreateEntity();
             parent.AttachChild(child);
@@ -119,7 +119,7 @@ namespace TryGet.Tests
         [Test]
         public void DetachBeforeDestroy_ChildSurvives()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity parent = world.CreateEntity();
             Entity child = world.CreateEntity();
             parent.AttachChild(child);
@@ -137,7 +137,7 @@ namespace TryGet.Tests
         public void DetachChildOnDestroyedParent_Throws()
         {
             // Issue-08 AC：已销毁 Entity 拒绝 Detach 操作。
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity parent = world.CreateEntity();
             Entity child = world.CreateEntity();
             parent.AttachChild(child);
@@ -154,7 +154,7 @@ namespace TryGet.Tests
         [Test]
         public void Handle_ResolvesLiveEntity()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             Handle handle = entity.GetHandle();
 
@@ -167,7 +167,7 @@ namespace TryGet.Tests
         [Test]
         public void Handle_ReturnsNullForDestroyedEntity()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             Handle handle = entity.GetHandle();
 

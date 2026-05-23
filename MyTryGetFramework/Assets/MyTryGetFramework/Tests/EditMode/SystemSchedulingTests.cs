@@ -63,14 +63,14 @@ namespace TryGet.Tests
         [Test]
         public void System_RunsInUpdatePhase()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.Attach(new HealthAspect());
 
             var system = new DamageSystem();
             world.RegisterSystem(system, Phase.Update);
             world.Start();
-            world.Update();
+            world.Update(0.016f, 0.016f);
 
             Assert.AreEqual(1, system.ExecuteCount);
             Assert.AreEqual(1, system.LastEntities.Count);
@@ -82,7 +82,7 @@ namespace TryGet.Tests
         [Test]
         public void System_OnlyReceivesQueryMatchedEntities()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity withHealth = world.CreateEntity();
             Entity without = world.CreateEntity();
             withHealth.Attach(new HealthAspect());
@@ -90,7 +90,7 @@ namespace TryGet.Tests
             var system = new DamageSystem();
             world.RegisterSystem(system, Phase.Update);
             world.Start();
-            world.Update();
+            world.Update(0.016f, 0.016f);
 
             Assert.AreEqual(1, system.LastEntities.Count);
             Assert.IsTrue(system.LastEntities.Contains(withHealth));
@@ -102,7 +102,7 @@ namespace TryGet.Tests
         [Test]
         public void SystemGroup_DeterminesExecutionOrder()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             var log = new List<string>();
 
             var groupA = new SystemGroup("GroupA");
@@ -116,7 +116,7 @@ namespace TryGet.Tests
             world.RegisterSystem(new TrackingSystem(log, "A2"), Phase.Update, groupA);
 
             world.Start();
-            world.Update();
+            world.Update(0.016f, 0.016f);
 
             // Group 执行顺序 = 添加顺序：GroupA → GroupB
             // System 执行顺序 = 注册顺序
@@ -131,13 +131,13 @@ namespace TryGet.Tests
         [Test]
         public void EnterPhaseSystem_RunsOnceAtStart()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             var log = new List<string>();
 
             world.RegisterSystem(new TrackingSystem(log, "EnterSys"), Phase.Enter);
             world.Start();
-            world.Update();
-            world.Update();
+            world.Update(0.016f, 0.016f);
+            world.Update(0.016f, 0.016f);
 
             Assert.AreEqual(1, log.Count);
             Assert.AreEqual("EnterSys", log[0]);
@@ -148,12 +148,12 @@ namespace TryGet.Tests
         [Test]
         public void ExitPhaseSystem_RunsOnceAtShutdown()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             var log = new List<string>();
 
             world.RegisterSystem(new TrackingSystem(log, "ExitSys"), Phase.Exit);
             world.Start();
-            world.Update();
+            world.Update(0.016f, 0.016f);
             world.Shutdown();
 
             Assert.AreEqual(1, log.Count);
@@ -163,7 +163,7 @@ namespace TryGet.Tests
         [Test]
         public void DestroyedEntity_NotReceivedBySystem()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.Attach(new HealthAspect());
 
@@ -172,7 +172,7 @@ namespace TryGet.Tests
             world.Start();
 
             world.DestroyEntity(entity);
-            world.Update();
+            world.Update(0.016f, 0.016f);
 
             Assert.AreEqual(1, system.ExecuteCount);
             Assert.AreEqual(0, system.LastEntities.Count);

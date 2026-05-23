@@ -29,7 +29,7 @@ namespace TryGet.Tests
         [Test]
         public void AttachAspect_EntityHasAspect()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             var health = new HealthAspect();
 
@@ -45,7 +45,7 @@ namespace TryGet.Tests
         [Test]
         public void DetachAspect_EntityNoLongerHasAspect()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             var health = new HealthAspect();
 
@@ -62,7 +62,7 @@ namespace TryGet.Tests
         [Test]
         public void AttachDuplicateAspectType_Throws()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.Attach(new HealthAspect());
 
@@ -77,7 +77,7 @@ namespace TryGet.Tests
         [Test]
         public void MultipleAspectTypes_Coexist()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.Attach(new HealthAspect());
             entity.Attach(new MoveAspect());

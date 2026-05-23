@@ -4,30 +4,20 @@ using System.Collections.Generic;
 namespace TryGet
 {
     /// <summary>
-    /// World 的运行状态。
+    /// 玩法层根：承载 Entity、System 和 Phase 调度（V0.3 起替代 V0.1 的 <c>World</c>）。
+    ///
+    /// 关键变化（相对 V0.1 World）：
+    /// - 实现 <see cref="IModule"/> + <see cref="IUpdateModule"/>，可挂到 ModuleHost 统一管理。
+    /// - <see cref="IUpdateModule.Update"/> 签名是 (deltaTime, unscaledDeltaTime)，
+    ///   V0.1 的无参 Update() 已弃用——测试需改用带参版本。
+    /// - 不再持有外部"全局事件总线"角色；EntityWorld 自身的 <see cref="EventBus"/> 仅作为
+    ///   World 级别的局部事件总线（V0.1 兼容）。全局事件请用 ModuleHost.EventBus。
+    /// - 不再支持 IWorldAdapter；驱动方式由 Unity 侧 WorldProxy 通过 ModuleHost 驱动。
     /// </summary>
-    public enum WorldState
-    {
-        /// <summary>创建后、尚未启动。</summary>
-        Created,
-        /// <summary>正在执行 Enter Phase。</summary>
-        Entering,
-        /// <summary>运行中（Update Phase 循环）。</summary>
-        Running,
-        /// <summary>正在执行 Exit Phase。</summary>
-        Exiting,
-        /// <summary>已关闭。</summary>
-        Shutdown,
-    }
-
-    /// <summary>
-    /// 一个独立的游戏世界实例，承载 Entity、System 和生命周期。
-    /// World 是运行时边界的根 — 拥有 Entity 生命周期、System 执行、Phase 推进和 SystemGroup 调度的所有权。
-    /// </summary>
-    public sealed class World
+    public sealed class EntityWorld : IEntityWorld
     {
         private readonly string _name;
-        private WorldState _state = WorldState.Created;
+        private EntityWorldState _state = EntityWorldState.Created;
 
         // Entity 管理
         private int _nextEntityIndex = 1;
@@ -40,24 +30,40 @@ namespace TryGet
         private readonly List<SystemGroup> _exitGroups = new List<SystemGroup>();
         private readonly List<SystemBase> _allSystems = new List<SystemBase>();
 
-        // 事件
+        // World 级别事件总线（V0.1 兼容；全局事件用 ModuleHost.EventBus）
         private readonly WorldEventBus _eventBus = new WorldEventBus();
 
-        public World(string name = "World")
+        public EntityWorld(string name = "World")
         {
             _name = name ?? "World";
         }
 
         public string Name => _name;
-        public WorldState State => _state;
+        public EntityWorldState State => _state;
         public IWorldEventBus EventBus => _eventBus;
         public IReadOnlyList<Entity> Entities => _entityList;
 
-        #region Entity Lifecycle
+        #region IModule
+
+        // EntityWorld 优先级介于 Common 三件套（-500）和业务 Module（0）之间，
+        // 让 Log/Timer/Pool 在 EntityWorld OnInit 时可用。
+        public int Priority => -100;
+        public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
 
         /// <summary>
-        /// 创建 Entity。EntityId 在此 World 内唯一（V0.1 不回收 index，Version 固定为 1）。
+        /// IModule.OnInit：触发 Enter Phase。
+        /// 测试中也可以直接调用 <see cref="Start"/>（旧 V0.1 API），不必经过 ModuleHost。
         /// </summary>
+        public void OnInit(IModuleHost host)
+        {
+            if (_state == EntityWorldState.Created)
+                Start();
+        }
+
+        #endregion
+
+        #region Entity Lifecycle
+
         public Entity CreateEntity()
         {
             ThrowIfShutdown();
@@ -70,16 +76,13 @@ namespace TryGet
             return entity;
         }
 
-        /// <summary>
-        /// 销毁 Entity。级联销毁子 Entity（叶子优先，ADR-0001 Ownership 树）。
-        /// </summary>
         public void DestroyEntity(Entity entity)
         {
             ThrowIfShutdown();
             if (entity == null)
                 throw new ArgumentNullException(nameof(entity));
             if (entity.World != this)
-                throw new InvalidOperationException("Entity does not belong to this World.");
+                throw new InvalidOperationException("Entity does not belong to this EntityWorld.");
             if (entity.IsDestroyed)
                 return;
 
@@ -87,9 +90,6 @@ namespace TryGet
             PurgeDestroyedEntities();
         }
 
-        /// <summary>
-        /// 通过 EntityId 获取 Entity。若已销毁或不存在则返回 null。
-        /// </summary>
         public Entity GetEntity(EntityId id)
         {
             if (_entities.TryGetValue(id, out var entity) && !entity.IsDestroyed)
@@ -97,10 +97,6 @@ namespace TryGet
             return null;
         }
 
-        /// <summary>
-        /// 从 _entities / _entityList 中移除全部 IsDestroyed=true 的 Entity。
-        /// 级联销毁会把整个子树标记为 destroyed，但单条 DestroyEntity 调用只会扫一次。
-        /// </summary>
         private void PurgeDestroyedEntities()
         {
             for (int i = _entityList.Count - 1; i >= 0; i--)
@@ -116,21 +112,14 @@ namespace TryGet
 
         #endregion
 
-        #region System Registration (ADR-0008)
+        #region System Registration (ADR-0008 V2)
 
-        /// <summary>
-        /// 注册 System 到指定的 Phase 和 SystemGroup。
-        /// 必须在 World 启动前（Enter Phase 前）或 Enter Phase 中注册。
-        /// </summary>
-        /// <param name="system">要注册的 System。</param>
-        /// <param name="phase">System 运行的 Phase。</param>
-        /// <param name="group">System 所属的 SystemGroup。若为 null 则使用默认组。</param>
         public void RegisterSystem(SystemBase system, Phase phase, SystemGroup group = null)
         {
             if (system == null)
                 throw new ArgumentNullException(nameof(system));
-            if (_state == WorldState.Shutdown)
-                throw new InvalidOperationException("Cannot register System to a shutdown World.");
+            if (_state == EntityWorldState.Shutdown)
+                throw new InvalidOperationException("Cannot register System to a shutdown EntityWorld.");
 
             if (group == null)
             {
@@ -147,10 +136,20 @@ namespace TryGet
             system.OnCreate();
         }
 
+        public void AddSystemGroup(SystemGroup group, Phase phase)
+        {
+            if (group == null)
+                throw new ArgumentNullException(nameof(group));
+            var groups = GetGroupsForPhase(phase);
+            if (!groups.Contains(group))
+            {
+                groups.Add(group);
+            }
+        }
+
         private SystemGroup GetOrCreateDefaultGroup(Phase phase)
         {
             var groups = GetGroupsForPhase(phase);
-            // 查找名为 "Default" 的 group
             foreach (var g in groups)
             {
                 if (g.Name == "Default")
@@ -181,59 +180,45 @@ namespace TryGet
             }
         }
 
-        /// <summary>
-        /// 添加 SystemGroup 到指定 Phase（控制 Group 之间的执行顺序）。
-        /// Group 的执行顺序 = 添加顺序。
-        /// </summary>
-        public void AddSystemGroup(SystemGroup group, Phase phase)
-        {
-            if (group == null)
-                throw new ArgumentNullException(nameof(group));
-            var groups = GetGroupsForPhase(phase);
-            if (!groups.Contains(group))
-            {
-                groups.Add(group);
-            }
-        }
-
         #endregion
 
         #region Phase Execution
 
         /// <summary>
-        /// 启动 World — 执行 Enter Phase 中所有 System。
+        /// 启动 EntityWorld，执行 Enter Phase。
+        /// 直接使用场景（非 ModuleHost 驱动）：测试 / 独立运行时。
         /// </summary>
         public void Start()
         {
-            if (_state != WorldState.Created)
-                throw new InvalidOperationException($"World cannot Start from state {_state}.");
+            if (_state != EntityWorldState.Created)
+                throw new InvalidOperationException($"EntityWorld cannot Start from state {_state}.");
 
-            _state = WorldState.Entering;
+            _state = EntityWorldState.Entering;
             ExecutePhase(_enterGroups);
-            _state = WorldState.Running;
+            _state = EntityWorldState.Running;
         }
 
         /// <summary>
-        /// 执行一次 Update tick。
+        /// IUpdateModule.Update：执行 Update Phase 中所有 System。
+        /// V0.3 起取代 V0.1 的无参 Update()——deltaTime 参数留作未来 System 拿。
         /// </summary>
-        public void Update()
+        public void Update(float deltaTime, float unscaledDeltaTime)
         {
-            if (_state != WorldState.Running)
-                throw new InvalidOperationException($"World cannot Update in state {_state}.");
+            if (_state != EntityWorldState.Running)
+                throw new InvalidOperationException($"EntityWorld cannot Update in state {_state}.");
 
             ExecutePhase(_updateGroups);
         }
 
         /// <summary>
-        /// 关闭 World — 执行 Exit Phase 中所有 System，然后清理。
-        /// Exit Phase 的 System 以注册顺序执行（如需逆序，在注册时控制）。
+        /// IModule.Shutdown：执行 Exit Phase，然后清理所有 System / Entity / EventBus。
         /// </summary>
         public void Shutdown()
         {
-            if (_state == WorldState.Shutdown)
+            if (_state == EntityWorldState.Shutdown)
                 return;
 
-            _state = WorldState.Exiting;
+            _state = EntityWorldState.Exiting;
             ExecutePhase(_exitGroups);
 
             // 销毁所有 System
@@ -257,7 +242,7 @@ namespace TryGet
             _entityList.Clear();
 
             _eventBus.Clear();
-            _state = WorldState.Shutdown;
+            _state = EntityWorldState.Shutdown;
         }
 
         private void ExecutePhase(List<SystemGroup> groups)
@@ -276,17 +261,11 @@ namespace TryGet
 
         #region Query Evaluation
 
-        /// <summary>
-        /// 对当前所有活跃 Entity 评估 Query，返回匹配列表。
-        /// </summary>
         internal List<Entity> EvaluateQuery(Query query)
         {
             var result = new List<Entity>();
             if (query == null)
-            {
-                // 无 Query 的 System 接收空列表
                 return result;
-            }
 
             for (int i = 0; i < _entityList.Count; i++)
             {
@@ -303,13 +282,13 @@ namespace TryGet
 
         private void ThrowIfShutdown()
         {
-            if (_state == WorldState.Shutdown)
-                throw new InvalidOperationException($"World '{_name}' is shutdown.");
+            if (_state == EntityWorldState.Shutdown)
+                throw new InvalidOperationException($"EntityWorld '{_name}' is shutdown.");
         }
 
         public override string ToString()
         {
-            return $"World({_name}, state={_state}, entities={_entityList.Count})";
+            return $"EntityWorld({_name}, state={_state}, entities={_entityList.Count})";
         }
     }
 }

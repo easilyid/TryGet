@@ -14,7 +14,7 @@ namespace TryGet.Tests
         [Test]
         public void AddTag_EntityHasTag()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
 
             bool added = entity.AddTag<DeadTag>();
@@ -28,7 +28,7 @@ namespace TryGet.Tests
         [Test]
         public void RemoveTag_EntityNoLongerHasTag()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.AddTag<DeadTag>();
 
@@ -43,7 +43,7 @@ namespace TryGet.Tests
         [Test]
         public void AddDuplicateTag_ReturnsFalse()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.AddTag<DeadTag>();
 
@@ -57,7 +57,7 @@ namespace TryGet.Tests
         [Test]
         public void MultipleTags_Coexist()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             entity.AddTag<DeadTag>();
             entity.AddTag<PoisonedTag>();

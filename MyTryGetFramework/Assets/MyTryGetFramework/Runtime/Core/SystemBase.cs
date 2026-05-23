@@ -13,13 +13,13 @@ namespace TryGet
     /// </summary>
     public abstract class SystemBase
     {
-        private World _world;
+        private EntityWorld _world;
         private Query _query;
 
         /// <summary>
-        /// 所属 World。由框架在注册时注入。
+        /// 所属 EntityWorld。由框架在注册时注入。
         /// </summary>
-        protected World World => _world;
+        protected EntityWorld World => _world;
 
         /// <summary>
         /// World-level 事件总线。便捷访问。
@@ -52,15 +52,15 @@ namespace TryGet
         protected internal abstract void Execute(IReadOnlyList<Entity> entities);
 
         /// <summary>
-        /// 框架内部：注入 World 引用。
+        /// 框架内部：注入 EntityWorld 引用。
         /// </summary>
-        internal void SetWorld(World world)
+        internal void SetWorld(EntityWorld world)
         {
             _world = world;
         }
 
         /// <summary>
-        /// 框架内部：清除 World 引用。
+        /// 框架内部：清除 EntityWorld 引用。
         /// </summary>
         internal void ClearWorld()
         {

@@ -10,7 +10,7 @@ namespace TryGet
     public sealed class Entity
     {
         private readonly EntityId _id;
-        private readonly World _world;
+        private readonly EntityWorld _world;
         private readonly Dictionary<Type, Aspect> _aspects = new Dictionary<Type, Aspect>();
         private readonly HashSet<Type> _tags = new HashSet<Type>();
 
@@ -20,7 +20,7 @@ namespace TryGet
 
         private bool _destroyed;
 
-        internal Entity(EntityId id, World world)
+        internal Entity(EntityId id, EntityWorld world)
         {
             _id = id;
             _world = world;
@@ -28,7 +28,7 @@ namespace TryGet
         }
 
         public EntityId Id => _id;
-        public World World => _world;
+        public EntityWorld World => _world;
         public bool IsDestroyed => _destroyed;
 
         /// <summary>

@@ -16,10 +16,10 @@ namespace TryGet
         }
 
         /// <summary>
-        /// 在指定 World 中解析目标 Entity。
+        /// 在指定 EntityWorld 中解析目标 Entity。
         /// </summary>
         /// <returns>目标 Entity，若已销毁则返回 null。</returns>
-        public Entity Resolve(World world)
+        public Entity Resolve(EntityWorld world)
         {
             if (!Id.IsValid || world == null)
                 return null;

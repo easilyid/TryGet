@@ -34,7 +34,7 @@ namespace TryGet.Tests
         [Test]
         public void EntityEvent_SubscriberReceivesEvent()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             int received = 0;
 
@@ -52,7 +52,7 @@ namespace TryGet.Tests
         [Test]
         public void EntityEvent_UnsubscribedHandler_NotCalled()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             int callCount = 0;
 
@@ -76,7 +76,7 @@ namespace TryGet.Tests
         [Test]
         public void WorldEvent_SubscriberReceivesEvent()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             int receivedCount = 0;
 
             world.EventBus.Subscribe<SpawnEvent>(evt => { receivedCount++; });
@@ -90,7 +90,7 @@ namespace TryGet.Tests
         [Test]
         public void WorldEvent_UnsubscribedHandler_NotCalled()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             int callCount = 0;
 
             void Handler(SpawnEvent evt) => callCount++;
@@ -107,7 +107,7 @@ namespace TryGet.Tests
         [Test]
         public void WorldEvent_MultipleSubscribers_AllReceive()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             int count1 = 0, count2 = 0;
 
             world.EventBus.Subscribe<SpawnEvent>(_ => count1++);

@@ -17,7 +17,7 @@ namespace TryGet.Tests
         [Test]
         public void AllOf_SingleAspect_MatchesCorrectly()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
             a.Attach(new HealthAspect());
@@ -33,7 +33,7 @@ namespace TryGet.Tests
         [Test]
         public void AllOf_MultipleAspects_RequiresAll()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
             a.Attach(new HealthAspect());
@@ -54,7 +54,7 @@ namespace TryGet.Tests
         [Test]
         public void NoneOf_ExcludesMatching()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
             a.Attach(new HealthAspect());
@@ -75,7 +75,7 @@ namespace TryGet.Tests
         [Test]
         public void NoneOfTag_ExcludesMatching()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
             a.Attach(new HealthAspect());
@@ -96,7 +96,7 @@ namespace TryGet.Tests
         [Test]
         public void AllOfTag_RequiresTag()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
             a.AddTag<DeadTag>();
@@ -112,7 +112,7 @@ namespace TryGet.Tests
         [Test]
         public void DestroyedEntity_DoesNotMatch()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             a.Attach(new HealthAspect());
 

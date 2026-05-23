@@ -11,7 +11,7 @@ namespace TryGet.Tests
         [Test]
         public void CreateEntity_ReturnsEntityWithValidId()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
 
             Assert.IsNotNull(entity);
@@ -25,7 +25,7 @@ namespace TryGet.Tests
         [Test]
         public void CreateMultipleEntities_HaveUniqueIds()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
 
@@ -37,7 +37,7 @@ namespace TryGet.Tests
         [Test]
         public void DestroyEntity_MarksAsDestroyed()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             world.DestroyEntity(entity);
 
@@ -49,7 +49,7 @@ namespace TryGet.Tests
         [Test]
         public void GetEntity_ReturnsNullForDestroyed()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
             EntityId id = entity.Id;
             world.DestroyEntity(entity);
@@ -62,11 +62,11 @@ namespace TryGet.Tests
         [Test]
         public void WorldStart_TransitionsToRunning()
         {
-            var world = new World("Test");
-            Assert.AreEqual(WorldState.Created, world.State);
+            var world = new EntityWorld("Test");
+            Assert.AreEqual(EntityWorldState.Created, world.State);
 
             world.Start();
-            Assert.AreEqual(WorldState.Running, world.State);
+            Assert.AreEqual(EntityWorldState.Running, world.State);
 
             world.Shutdown();
         }
@@ -74,17 +74,17 @@ namespace TryGet.Tests
         [Test]
         public void WorldShutdown_TransitionsToShutdown()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             world.Start();
             world.Shutdown();
 
-            Assert.AreEqual(WorldState.Shutdown, world.State);
+            Assert.AreEqual(EntityWorldState.Shutdown, world.State);
         }
 
         [Test]
         public void WorldShutdown_DestroysAllEntities()
         {
-            var world = new World("Test");
+            var world = new EntityWorld("Test");
             Entity a = world.CreateEntity();
             Entity b = world.CreateEntity();
             world.Start();
