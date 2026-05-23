@@ -11,6 +11,7 @@ namespace TryGet
         private readonly Dictionary<string, IProcedure> _procedures = new Dictionary<string, IProcedure>();
         private IProcedure _current;
         private string _currentId;
+        private IModuleHost _host;
 
         // 介于 EntityWorld (-100) 与业务 Module (0) 之间：
         // Procedure 在 World 启动后驱动游戏流程，但业务 Module 可依赖 IProcedureModule 拉取当前状态。
@@ -19,8 +20,9 @@ namespace TryGet
 
         public string CurrentState => _currentId;
         public bool IsRunning => _current != null;
+        public IModuleHost Host => _host;
 
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleHost host) { _host = host; }
 
         public void Shutdown()
         {
@@ -32,6 +34,7 @@ namespace TryGet
             _current = null;
             _currentId = null;
             _procedures.Clear();
+            _host = null;
         }
 
         public void Update(float deltaTime, float unscaledDeltaTime)

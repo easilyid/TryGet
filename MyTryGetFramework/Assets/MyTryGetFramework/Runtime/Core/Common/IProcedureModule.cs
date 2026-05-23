@@ -23,6 +23,13 @@ namespace TryGet
         bool IsRunning { get; }
 
         /// <summary>
+        /// 持有的 ModuleHost 引用，在 <see cref="IModule.OnInit"/> 时被注入。
+        /// Procedure 通过此引用拉取其他 Module（如 ITimerModule / IEntityWorld）。
+        /// 未通过 ModuleHost 驱动时为 null。
+        /// </summary>
+        IModuleHost Host { get; }
+
+        /// <summary>
         /// 注册一个 Procedure 到此 Module。id 在此 Module 内唯一，重复注册抛 <see cref="System.InvalidOperationException"/>。
         /// </summary>
         void AddProcedure(string id, IProcedure procedure);
