@@ -10,6 +10,7 @@ namespace TryGet
     public sealed class ConsoleLogModule : ILogModule
     {
         private readonly List<(LogLevel level, string message)> _captured = new List<(LogLevel, string)>();
+        private bool _shutdown;
 
         public int Priority => -1000;  // 极早初始化，让其他 Module 在 OnInit 中能用 log
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
@@ -26,8 +27,8 @@ namespace TryGet
         /// </summary>
         public bool CaptureToMemory { get; set; }
 
-        public void OnInit(IModuleHost host) { }
-        public void Shutdown() { _captured.Clear(); OnLog = null; }
+        public void OnInit(IModuleHost host) { _shutdown = false; }
+        public void Shutdown() { _captured.Clear(); OnLog = null; _shutdown = true; }
 
         public void Debug(string message) => Write(LogLevel.Debug, message);
         public void Info(string message) => Write(LogLevel.Info, message);
@@ -43,6 +44,9 @@ namespace TryGet
 
         private void Write(LogLevel level, string message)
         {
+            // Shutdown 后静默：Module 已释放资源，再调用是误用，不应崩。
+            if (_shutdown) return;
+
             if (level < MinimumLevel)
                 return;
 

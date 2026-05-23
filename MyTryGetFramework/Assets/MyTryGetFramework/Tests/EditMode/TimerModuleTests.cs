@@ -228,5 +228,91 @@ namespace TryGet.Tests
             host.Update(1f, 1f);
             Assert.AreEqual(1, fired);
         }
+
+        // —— 来自 Stage-2 review 必改：callback 内 Schedule/Cancel + 异常聚合 ——
+
+        [Test]
+        public void CallbackException_DoesNotPreventOtherTimersInSameFrame()
+        {
+            var t = new TimerModule();
+            int firedA = 0, firedC = 0;
+            t.Schedule(0.5f, () => firedA++);
+            t.Schedule(0.5f, () => throw new InvalidOperationException("B boom"));
+            t.Schedule(0.5f, () => firedC++);
+
+            var ex = Assert.Throws<AggregateException>(() => t.Update(1f, 1f));
+            Assert.AreEqual(1, ex.InnerExceptions.Count);
+            Assert.AreEqual(1, firedA, "A 应在 B 抛出前/后被触发");
+            Assert.AreEqual(1, firedC, "C 不应因 B 抛出而被跳过（异常聚合）");
+            Assert.AreEqual(0, t.PendingCount, "本帧到期的 3 个 timer 都应被移除");
+        }
+
+        [Test]
+        public void MultipleCallbackExceptions_AreAggregated()
+        {
+            var t = new TimerModule();
+            t.Schedule(0.5f, () => throw new InvalidOperationException("e1"));
+            t.Schedule(0.5f, () => throw new InvalidOperationException("e2"));
+
+            var ex = Assert.Throws<AggregateException>(() => t.Update(1f, 1f));
+            Assert.AreEqual(2, ex.InnerExceptions.Count);
+        }
+
+        [Test]
+        public void Callback_ScheduleNewTimer_NewTimerNotFiredThisFrame()
+        {
+            var t = new TimerModule();
+            int outer = 0, inner = 0;
+            t.Schedule(0.5f, () =>
+            {
+                outer++;
+                t.Schedule(0.5f, () => inner++);
+            });
+
+            t.Update(1f, 1f);
+
+            Assert.AreEqual(1, outer);
+            Assert.AreEqual(0, inner, "新 timer 当帧不应触发");
+            Assert.AreEqual(1, t.PendingCount, "新 timer 应在 pending 列表");
+
+            t.Update(1f, 1f);
+            Assert.AreEqual(1, inner, "新 timer 下一帧触发");
+        }
+
+        [Test]
+        public void Callback_CancelAnotherPendingTimer_TargetGetsCancelled()
+        {
+            var t = new TimerModule();
+            int firedA = 0, firedC = 0;
+            TimerHandle handleC = default;
+
+            // A 到期时取消 C（C 还没到期）
+            t.Schedule(0.5f, () => { firedA++; t.Cancel(handleC); });
+            handleC = t.Schedule(1.5f, () => firedC++);
+
+            // 第一帧推进 1f：A 到期触发并 Cancel C
+            t.Update(1f, 1f);
+            Assert.AreEqual(1, firedA);
+            // C 已被 Cancel：下次 Update 应跳过它
+            t.Update(2f, 2f);
+            Assert.AreEqual(0, firedC);
+        }
+
+        [Test]
+        public void SameFrame_MultipleTimers_AllFireOnce()
+        {
+            var t = new TimerModule();
+            int countA = 0, countB = 0, countC = 0;
+            t.Schedule(0.5f, () => countA++);
+            t.Schedule(0.5f, () => countB++);
+            t.Schedule(0.5f, () => countC++);
+
+            t.Update(1f, 1f);
+
+            Assert.AreEqual(1, countA);
+            Assert.AreEqual(1, countB);
+            Assert.AreEqual(1, countC);
+            Assert.AreEqual(0, t.PendingCount);
+        }
     }
 }

@@ -142,5 +142,34 @@ namespace TryGet.Tests
             // 验证 Shutdown 路径
             host.Shutdown();
         }
+
+        // —— 来自 Stage-2 review 必改：Shutdown 后调用 Log 不应崩 ——
+
+        [Test]
+        public void Log_AfterShutdown_IsSilentlyDropped()
+        {
+            var log = new ConsoleLogModule { CaptureToMemory = true };
+            log.Info("before");
+            log.Shutdown();
+
+            // Shutdown 后调用不应抛
+            Assert.DoesNotThrow(() => log.Info("after"));
+            Assert.DoesNotThrow(() => log.Error("after", new InvalidOperationException()));
+            Assert.AreEqual(0, log.GetCapturedEntries().Count, "Shutdown 后不再回填 captured");
+        }
+
+        [Test]
+        public void OnInit_AfterPreviousShutdown_RestoresWritability()
+        {
+            // Shutdown 后再 OnInit（例如 ModuleHost 失败回滚后修复重试）应可写
+            var log = new ConsoleLogModule { CaptureToMemory = true };
+            log.Shutdown();
+            log.OnInit(null);
+
+            log.Info("reborn");
+
+            Assert.AreEqual(1, log.GetCapturedEntries().Count);
+            Assert.AreEqual("reborn", log.GetCapturedEntries()[0].message);
+        }
     }
 }

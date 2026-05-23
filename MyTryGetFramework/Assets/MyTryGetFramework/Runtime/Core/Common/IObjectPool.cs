@@ -13,6 +13,9 @@ namespace TryGet
 
         /// <summary>
         /// 归还对象。归还前会调用注册时提供的 onReturn 回调（用于重置状态）。
+        ///
+        /// **重复 Return 同一对象是未定义行为**：会导致同一实例被 Rent 两次分发给不同 caller，引发隐蔽 bug。
+        /// 调用方负责保证每个对象只 Return 一次。V0.3+ 可选 DEBUG HashSet 检测。
         /// </summary>
         void Return(T item);
 

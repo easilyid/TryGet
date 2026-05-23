@@ -173,5 +173,42 @@ namespace TryGet.Tests
             var ex = Assert.Throws<ModuleNotRegisteredException>(() => host.Get<IGoodModule>());
             Assert.AreEqual(typeof(IGoodModule), ex.InterfaceType);
         }
+
+        // —— 来自 Stage-2 review 必改：失败回滚后状态干净 + Shutdown 二次调用幂等 ——
+
+        [Test]
+        public void Initialize_AfterFailureRollback_StateIsClean_ReinitFailsSamePath()
+        {
+            // 失败回滚后再 Initialize 应按相同失败路径再次抛出，并再次回滚——证明 host 状态未泄漏。
+            var host = new ModuleHost();
+            var good = new GoodModule();
+            host.Register<IGoodModule>(good);
+            host.Register<IThrowOnInitModule>(new ThrowOnInitModule());
+
+            Assert.Throws<InvalidOperationException>(() => host.Initialize());
+            Assert.IsFalse(host.IsInitialized);
+
+            // 第二次 Initialize：Good 应该再次 Init + 再次 Rollback
+            good.InitCalled = false;
+            good.ShutdownCalled = false;
+            Assert.Throws<InvalidOperationException>(() => host.Initialize());
+            Assert.IsTrue(good.InitCalled, "第二次 Initialize 时 Good 再次 OnInit");
+            Assert.IsTrue(good.ShutdownCalled, "第二次失败时 Good 再次 Rollback");
+            Assert.IsFalse(host.IsInitialized);
+        }
+
+        [Test]
+        public void Shutdown_AfterShutdownException_SecondShutdownIsIdempotent()
+        {
+            var host = new ModuleHost();
+            host.Register<IGoodModule>(new GoodModule());
+            host.Register<IThrowOnShutdownModule>(new ThrowOnShutdownModule { Name = "M" });
+            host.Initialize();
+
+            Assert.Throws<ModuleShutdownException>(() => host.Shutdown());
+
+            // 二次 Shutdown 不应再抛（IsInitialized 已置 false，直接返回）
+            Assert.DoesNotThrow(() => host.Shutdown());
+        }
     }
 }

@@ -95,6 +95,10 @@ namespace TryGet
 
         /// <summary>
         /// 按 DependsOn 拓扑序 OnInit 所有 Module。中途失败时倒序 Shutdown 已初始化部分，状态回滚。
+        ///
+        /// 失败语义：Initialize 抛异常后，<see cref="IsInitialized"/> 仍为 false，所有已注册 Module 保留在
+        /// _modulesByInterface 中。调用方可在修复后（例如 V0.3+ Replace API）再次 Initialize；目前推荐做法
+        /// 是丢弃 ModuleHost 实例并重新构造。重复 Initialize 已初始化的 host 抛 <see cref="InvalidOperationException"/>。
         /// </summary>
         public void Initialize()
         {

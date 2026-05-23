@@ -224,5 +224,37 @@ namespace TryGet.Tests
 
             host.Shutdown();
         }
+
+        // —— 来自 Stage-2 review 建议：double Return + 非 Rent 来源对象 ——
+
+        [Test]
+        public void DoubleReturn_SameInstance_IsDocumentedUndefinedBehavior()
+        {
+            // V0.2 不强制检测，但记录行为：IdleCount 会被错误地增加 2，
+            // 之后 Rent 两次会得到同一引用。调用方负责避免重复 Return（见 IObjectPool.Return XML 注释）。
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+            var d = new Dummy { Tag = 1 };
+
+            pool.Return(d);
+            pool.Return(d);
+
+            Assert.AreEqual(2, pool.IdleCount, "未定义行为：IdleCount 计数会偏高");
+            var first = pool.Rent();
+            var second = pool.Rent();
+            Assert.AreSame(first, second, "未定义行为：两次 Rent 给出同一实例");
+        }
+
+        [Test]
+        public void ReturnObjectNotFromRent_IsAccepted_NoCrash()
+        {
+            // 池不验证来源（V0.2 简化），手动 new 的对象 Return 进去也接受。
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+
+            pool.Return(new Dummy());
+
+            Assert.AreEqual(1, pool.IdleCount);
+        }
     }
 }
