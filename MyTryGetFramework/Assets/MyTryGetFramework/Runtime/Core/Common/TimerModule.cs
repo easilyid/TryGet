@@ -9,6 +9,8 @@ namespace TryGet
     ///
     /// 精度：每帧 deltaTime 减法累积，长时定时器（&gt;10s）会有浮点漂移（量级毫秒）。
     /// 关键业务计时请避免直接依赖本实现，等待 V0.3+ 升级为绝对时间戳方案。
+    ///
+    /// V0.5 增强：Repeating + Paused 状态字段（非破坏性，旧 API 行为完全不变）。
     /// </summary>
     public sealed class TimerModule : ITimerModule, IUpdateModule
     {
@@ -16,9 +18,12 @@ namespace TryGet
         {
             public long Id;
             public float RemainingSeconds;
+            public float Interval;       // V0.5: 周期 timer 的触发间隔（一次性 timer 为 0）
             public Action Callback;
             public bool Unscaled;
             public bool Cancelled;
+            public bool Repeating;       // V0.5: 周期 timer 标志
+            public bool Paused;          // V0.5: 暂停标志
         }
 
         private readonly List<Entry> _entries = new List<Entry>();
@@ -42,26 +47,34 @@ namespace TryGet
         public void Shutdown() { _entries.Clear(); }
 
         public TimerHandle Schedule(float seconds, Action callback) =>
-            ScheduleInternal(seconds, callback, unscaled: false);
+            ScheduleInternal(seconds, callback, unscaled: false, repeating: false);
 
         public TimerHandle ScheduleUnscaled(float seconds, Action callback) =>
-            ScheduleInternal(seconds, callback, unscaled: true);
+            ScheduleInternal(seconds, callback, unscaled: true, repeating: false);
 
-        private TimerHandle ScheduleInternal(float seconds, Action callback, bool unscaled)
+        public TimerHandle ScheduleRepeat(float intervalSeconds, Action callback) =>
+            ScheduleInternal(intervalSeconds, callback, unscaled: false, repeating: true);
+
+        private TimerHandle ScheduleInternal(float seconds, Action callback, bool unscaled, bool repeating)
         {
             if (callback == null)
                 throw new ArgumentNullException(nameof(callback));
             if (seconds < 0)
                 throw new ArgumentOutOfRangeException(nameof(seconds), "Must be >= 0");
+            if (repeating && seconds <= 0f)
+                throw new ArgumentOutOfRangeException(nameof(seconds), "Repeating interval must be > 0 to avoid infinite loop");
 
             long id = _nextId++;
             _entries.Add(new Entry
             {
                 Id = id,
                 RemainingSeconds = seconds,
+                Interval = repeating ? seconds : 0f,
                 Callback = callback,
                 Unscaled = unscaled,
                 Cancelled = false,
+                Repeating = repeating,
+                Paused = false,
             });
             return new TimerHandle(id);
         }
@@ -79,6 +92,52 @@ namespace TryGet
                     _entries[i] = entry;
                     return true;
                 }
+            }
+            return false;
+        }
+
+        public bool Pause(TimerHandle handle)
+        {
+            if (!handle.IsValid) return false;
+
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                if (_entries[i].Id == handle.Id && !_entries[i].Cancelled && !_entries[i].Paused)
+                {
+                    var entry = _entries[i];
+                    entry.Paused = true;
+                    _entries[i] = entry;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool Resume(TimerHandle handle)
+        {
+            if (!handle.IsValid) return false;
+
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                if (_entries[i].Id == handle.Id && !_entries[i].Cancelled && _entries[i].Paused)
+                {
+                    var entry = _entries[i];
+                    entry.Paused = false;
+                    _entries[i] = entry;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool IsPaused(TimerHandle handle)
+        {
+            if (!handle.IsValid) return false;
+
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                if (_entries[i].Id == handle.Id && !_entries[i].Cancelled)
+                    return _entries[i].Paused;
             }
             return false;
         }
@@ -109,11 +168,25 @@ namespace TryGet
                     continue;
                 }
 
+                // V0.5: 暂停 timer 不推进
+                if (entry.Paused) continue;
+
                 entry.RemainingSeconds -= entry.Unscaled ? unscaledDeltaTime : deltaTime;
                 if (entry.RemainingSeconds <= 0f)
                 {
                     var callback = entry.Callback;
-                    _entries.RemoveAt(i);
+
+                    // V0.5: 周期 timer 不删除，重置 RemainingSeconds = Interval
+                    if (entry.Repeating)
+                    {
+                        entry.RemainingSeconds = entry.Interval;
+                        _entries[i] = entry;
+                    }
+                    else
+                    {
+                        _entries.RemoveAt(i);
+                    }
+
                     try { callback?.Invoke(); }
                     catch (Exception ex)
                     {

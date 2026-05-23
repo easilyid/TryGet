@@ -7,6 +7,8 @@ namespace TryGet
     ///
     /// 取消：cancel 已触发的 handle 返回 false，cancel 未触发的 handle 返回 true。
     /// 时间基准：默认走 scaled deltaTime（受 timeScale 影响），可通过 <see cref="ScheduleUnscaled"/> 走 unscaled。
+    ///
+    /// V0.5 增强：ScheduleRepeat / Pause / Resume（关卡暂停 / 周期触发刚需）。
     /// </summary>
     public interface ITimerModule : IModule
     {
@@ -23,12 +25,33 @@ namespace TryGet
         TimerHandle ScheduleUnscaled(float seconds, Action callback);
 
         /// <summary>
-        /// 取消未触发的定时器。已触发或已取消返回 false。
+        /// 周期性触发：每隔 <paramref name="intervalSeconds"/> 秒执行一次，直到 Cancel。
+        /// 第一次触发在 intervalSeconds 后（不立即触发）。使用 scaled deltaTime。
+        /// </summary>
+        TimerHandle ScheduleRepeat(float intervalSeconds, Action callback);
+
+        /// <summary>
+        /// 取消定时器（一次性或周期性）。已触发并删除的一次性 handle 返回 false。
         /// </summary>
         bool Cancel(TimerHandle handle);
 
         /// <summary>
-        /// 当前未触发的定时器数量（用于诊断/测试）。
+        /// 暂停定时器（剩余时间冻结，Update 不推进）。未找到/已暂停返回 false。
+        /// </summary>
+        bool Pause(TimerHandle handle);
+
+        /// <summary>
+        /// 恢复定时器。未找到/未暂停返回 false。
+        /// </summary>
+        bool Resume(TimerHandle handle);
+
+        /// <summary>
+        /// 是否已暂停。未找到返回 false。
+        /// </summary>
+        bool IsPaused(TimerHandle handle);
+
+        /// <summary>
+        /// 当前未触发的定时器数量（用于诊断/测试）。包括已暂停的。
         /// </summary>
         int PendingCount { get; }
     }
