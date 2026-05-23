@@ -10,13 +10,16 @@ namespace TryGet
     /// 提供 SimulatePress / SimulateRelease / SetAxis / SetAxis2D 等"可控"API
     /// 让测试代码能复现真实输入序列。
     ///
-    /// 实现细节：是 IUpdateModule，每帧清空 _pressedThisFrame / _releasedThisFrame
-    /// 实现"per-frame edge"语义（与 Unity Input.GetKeyDown 一致）。
+    /// 实现细节：是 <see cref="ILateUpdateModule"/>（而非 IUpdateModule），
+    /// 在 **LateUpdate** 阶段清空 _pressedThisFrame / _releasedThisFrame 实现"per-frame edge"语义。
+    /// 选 LateUpdate 而非 Update 的原因：业务（Procedure / Aspect / System）在 Update 阶段
+    /// 读 WasPressedThisFrame，如果在 Update 阶段先清边，业务就永远看不到本帧输入。
+    /// LateUpdate 在所有 Update 之后跑，保证业务先消费 edge 再清空，与 Unity Input 行为一致。
     ///
     /// Production Unity 由 Adapters/Unity 层的 UnityInputModule（接 InputSystem 的
     /// InputAction）替换。
     /// </summary>
-    public sealed class MemoryInputModule : IInputModule, IUpdateModule
+    public sealed class MemoryInputModule : IInputModule, ILateUpdateModule
     {
         private readonly HashSet<string> _pressed = new HashSet<string>();
         private readonly HashSet<string> _pressedThisFrame = new HashSet<string>();
@@ -43,9 +46,10 @@ namespace TryGet
         }
 
         /// <summary>
-        /// 每帧 Update：清空 edge 集合（让 WasPressedThisFrame 在下一帧之后归 false）。
+        /// 每帧 LateUpdate：清空 edge 集合（让 WasPressedThisFrame 在下一帧之后归 false）。
+        /// 在 LateUpdate 而非 Update 中清，保证业务 Update 阶段能消费本帧 edge。
         /// </summary>
-        public void Update(float deltaTime, float unscaledDeltaTime)
+        public void LateUpdate(float deltaTime, float unscaledDeltaTime)
         {
             _pressedThisFrame.Clear();
             _releasedThisFrame.Clear();

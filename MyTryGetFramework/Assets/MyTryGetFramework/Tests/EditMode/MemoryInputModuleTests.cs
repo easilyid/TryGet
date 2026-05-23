@@ -108,22 +108,22 @@ namespace TryGet.Tests
         // —— Per-frame edge 语义 ——
 
         [Test]
-        public void Update_ClearsThisFrameEdges_KeepsPressed()
+        public void LateUpdate_ClearsThisFrameEdges_KeepsPressed()
         {
             var i = new MemoryInputModule();
             i.SimulatePress("Jump");
 
             Assert.IsTrue(i.WasPressedThisFrame("Jump"));
 
-            // Update 推进到下一帧
-            i.Update(0.016f, 0.016f);
+            // LateUpdate 推进到下一帧（设计：业务在 Update 期间消费 edge，LateUpdate 清边）
+            i.LateUpdate(0.016f, 0.016f);
 
             Assert.IsTrue(i.IsPressed("Jump"), "按住状态保持");
-            Assert.IsFalse(i.WasPressedThisFrame("Jump"), "edge 在下一帧 Update 后归 false");
+            Assert.IsFalse(i.WasPressedThisFrame("Jump"), "edge 在 LateUpdate 后归 false");
         }
 
         [Test]
-        public void Update_ClearsReleaseEdge()
+        public void LateUpdate_ClearsReleaseEdge()
         {
             var i = new MemoryInputModule();
             i.SimulatePress("Jump");
@@ -131,7 +131,7 @@ namespace TryGet.Tests
 
             Assert.IsTrue(i.WasReleasedThisFrame("Jump"));
 
-            i.Update(0.016f, 0.016f);
+            i.LateUpdate(0.016f, 0.016f);
 
             Assert.IsFalse(i.WasReleasedThisFrame("Jump"));
         }
@@ -143,14 +143,14 @@ namespace TryGet.Tests
             i.SimulatePress("Fire");
             Assert.IsTrue(i.WasPressedThisFrame("Fire"));
 
-            i.Update(0.016f, 0.016f);
+            i.LateUpdate(0.016f, 0.016f);
             Assert.IsFalse(i.WasPressedThisFrame("Fire"));
             Assert.IsTrue(i.IsPressed("Fire"));
 
             i.SimulateRelease("Fire");
             Assert.IsTrue(i.WasReleasedThisFrame("Fire"));
 
-            i.Update(0.016f, 0.016f);
+            i.LateUpdate(0.016f, 0.016f);
             Assert.IsFalse(i.WasReleasedThisFrame("Fire"));
             Assert.IsFalse(i.IsPressed("Fire"));
         }
@@ -264,10 +264,10 @@ namespace TryGet.Tests
             Assert.AreEqual(0f, y);
         }
 
-        // —— ModuleHost 集成 + IUpdateModule 驱动 ——
+        // —— ModuleHost 集成 + ILateUpdateModule 驱动 ——
 
         [Test]
-        public void IntegratesWithModuleHost_UpdateClearsEdges()
+        public void IntegratesWithModuleHost_LateUpdateClearsEdges()
         {
             var host = new ModuleHost();
             host.Register<IInputModule>(new MemoryInputModule());
@@ -278,10 +278,14 @@ namespace TryGet.Tests
 
             Assert.IsTrue(input.WasPressedThisFrame("Jump"));
 
-            // host.Update 应通过 IUpdateModule 调度调到 MemoryInputModule.Update
+            // host.Update 不会清边（业务消费阶段）
             host.Update(0.016f, 0.016f);
+            Assert.IsTrue(input.WasPressedThisFrame("Jump"), "Update 不清边");
 
-            Assert.IsFalse(input.WasPressedThisFrame("Jump"), "host.Update 经 IUpdateModule 调度清 edge");
+            // host.LateUpdate 经 ILateUpdateModule 调度调到 MemoryInputModule.LateUpdate 清边
+            host.LateUpdate(0.016f, 0.016f);
+
+            Assert.IsFalse(input.WasPressedThisFrame("Jump"), "host.LateUpdate 后清边");
             Assert.IsTrue(input.IsPressed("Jump"));
 
             host.Shutdown();
