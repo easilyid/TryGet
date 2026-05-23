@@ -1,0 +1,14 @@
+# 构建产物（Visual Studio / dotnet CLI）
+bin/
+obj/
+*.user
+*.suo
+
+# Rider / IDE 缓存
+.idea/
+.vs/
+
+# 覆盖仓库根的 *.csproj 忽略：ServerProject/ 下的 csproj 是手写的 Shadow csproj，必须入库
+!*.csproj
+!**/*.csproj
+!*.sln

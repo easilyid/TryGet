@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Shadow csproj for MyTryGetFramework.Core (ADR-0012).
+
+    用途：让 Core asmdef 的源码在 .NET（非 Unity）环境也能编过，验证 noEngineReferences 路线
+    确实是跨端可用。Unity 端用 asmdef 编译，服务端 / CI 用此 csproj 编译。
+
+    源码 100% 共享：通过 <Compile Include="..\..\MyTryGetFramework\Assets\..."> 反向引用 Unity
+    项目下的 .cs 文件，**不复制**。新增跨端文件无需更新 csproj（通配自动覆盖）。
+
+    维护规则：
+    - 任何 using UnityEngine / Unity.* 在 Core 树都会导致此 csproj 编译失败 — 这就是"双端门"。
+    - V0.5 Network 落地后追加 MyTryGetFramework.Network.csproj。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <RootNamespace>TryGet</RootNamespace>
+    <AssemblyName>MyTryGetFramework.Core</AssemblyName>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+
+    <!-- 关闭 SDK 默认的 Compile 通配，下面我们手动用相对路径包含 Unity 目录下的源 -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <!-- 与 Unity asmdef 行为对齐：不强制 warnings as errors -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\MyTryGetFramework\Assets\MyTryGetFramework\Runtime\Core\**\*.cs" />
+  </ItemGroup>
+
+</Project>
