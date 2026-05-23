@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-0011 (V2 redesign). V0.3 起 System 由 EntityWorld（本身一个 IModule）拥有，注册与执行按 IModule 拓扑序 + Phase 内的 SystemGroup 双层语义。本 ADR 描述的 V0.1 直注册模型不再生效。
 
 ## Context
 
