@@ -46,7 +46,7 @@ namespace TryGet.Tests
         private class CameraModule : ICameraModule, ILateUpdateModule
         {
             public int Priority => 0;
-            public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
+            public IReadOnlyList<Type> DependsOn { get; set; } = Array.Empty<Type>();
             public List<string> Log;
 
             public void OnInit(IModuleHost host) { }
@@ -139,22 +139,22 @@ namespace TryGet.Tests
         [Test]
         public void Update_OrderMatchesInitOrder()
         {
-            // 通过依赖关系强制初始化顺序，验证 Update 也按此顺序
+            // 用 DependsOn 强制拓扑顺序：Camera 依赖 Renderer，验证 LateUpdate 序与拓扑序一致。
             var host = new ModuleHost();
             var log = new List<string>();
             var renderer = new RendererModule { Log = log };
-            var camera = new CameraModule { Log = log };
+            var camera = new CameraModule { Log = log, DependsOn = new[] { typeof(IRendererModule) } };
 
-            host.Register<IRendererModule>(renderer);
+            // 故意打乱注册顺序（Camera 先注册）
             host.Register<ICameraModule>(camera);
+            host.Register<IRendererModule>(renderer);
             host.Initialize();
             log.Clear();
 
             host.Update(0.016f, 0.016f);
             host.LateUpdate(0.016f, 0.016f);
 
-            // Renderer 实现 IUpdateModule，Camera 不实现；
-            // LateUpdate 都实现，Renderer 先注册
+            // 拓扑序：Renderer → Camera。Renderer 实现 IUpdate + ILate，Camera 仅 ILate
             Assert.AreEqual(new[] { "update:Renderer", "late:Renderer", "late:Camera" }, log.ToArray());
         }
 

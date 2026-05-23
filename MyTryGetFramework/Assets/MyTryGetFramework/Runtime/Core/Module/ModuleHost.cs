@@ -8,7 +8,12 @@ namespace TryGet
     ///
     /// 迭代 0 范围：Register / Get / TryGet / EventBus。
     /// 迭代 1 范围：Initialize（拓扑排序 + OnInit）/ Shutdown（逆序）。
-    /// 后续迭代将引入 Update / LateUpdate。
+    /// 迭代 2 范围：Update / LateUpdate 调度。
+    ///
+    /// 错误路径安全（来自 Stage-2 review）：
+    /// - Initialize 中途 OnInit 抛出时，已 OnInit 的 Module 倒序 Shutdown，状态回滚为未初始化
+    /// - Shutdown 中单 Module 抛出不中断其余 Module 的 Shutdown，最终聚合为 ModuleShutdownException
+    /// - DependsOn 返回 null 视为空集合
     ///
     /// 非线程安全：所有方法须在主线程调用。
     /// </summary>
@@ -28,7 +33,7 @@ namespace TryGet
         // 拓扑排序后的初始化顺序，Shutdown 用它的逆序。
         private List<IModule> _initOrder;
 
-        // 缓存 IUpdateModule / ILateUpdateModule 实例（按 Initialize 顺序）避免每帧 OfType 过滤。
+        // 缓存 IUpdateModule / ILateUpdateModule 实例避免每帧 OfType。
         private List<IUpdateModule> _updateModules;
         private List<ILateUpdateModule> _lateUpdateModules;
 
@@ -59,8 +64,7 @@ namespace TryGet
                     "Use the Module's own service interface (e.g. ILogModule).");
 
             if (_modulesByInterface.ContainsKey(key))
-                throw new InvalidOperationException(
-                    $"Module of interface {key.Name} already registered.");
+                throw new ModuleAlreadyRegisteredException(key);
 
             _modulesByInterface[key] = module;
         }
@@ -70,8 +74,7 @@ namespace TryGet
             if (_modulesByInterface.TryGetValue(typeof(T), out IModule module))
                 return (T)module;
 
-            throw new InvalidOperationException(
-                $"Module of interface {typeof(T).Name} not registered.");
+            throw new ModuleNotRegisteredException(typeof(T));
         }
 
         public bool TryGet<T>(out T module) where T : class, IModule
@@ -91,33 +94,51 @@ namespace TryGet
         #region Lifecycle
 
         /// <summary>
-        /// 按 DependsOn 拓扑序（Priority 作 tie-breaker）依次 OnInit 所有 Module。
+        /// 按 DependsOn 拓扑序 OnInit 所有 Module。中途失败时倒序 Shutdown 已初始化部分，状态回滚。
         /// </summary>
         public void Initialize()
         {
             if (_initialized)
                 throw new InvalidOperationException("ModuleHost already initialized.");
 
-            _initOrder = TopologicalSort();
+            var sortedOrder = TopologicalSort();
 
-            // 去重：同一实例通过多接口注册时，只 OnInit 一次。
+            // 去重 + 渐进式 OnInit，失败时回滚
             var initialized = new HashSet<IModule>();
-            _updateModules = new List<IUpdateModule>();
-            _lateUpdateModules = new List<ILateUpdateModule>();
+            var initializedInOrder = new List<IModule>();
+            var updateModules = new List<IUpdateModule>();
+            var lateUpdateModules = new List<ILateUpdateModule>();
 
-            foreach (var module in _initOrder)
+            try
             {
-                if (initialized.Add(module))
+                foreach (var module in sortedOrder)
                 {
+                    if (!initialized.Add(module))
+                        continue;
+
                     module.OnInit(this);
+                    initializedInOrder.Add(module);
 
                     if (module is IUpdateModule um)
-                        _updateModules.Add(um);
+                        updateModules.Add(um);
                     if (module is ILateUpdateModule lum)
-                        _lateUpdateModules.Add(lum);
+                        lateUpdateModules.Add(lum);
                 }
             }
+            catch
+            {
+                // 失败回滚：倒序 Shutdown 已 OnInit 的部分
+                for (int i = initializedInOrder.Count - 1; i >= 0; i--)
+                {
+                    try { initializedInOrder[i].Shutdown(); }
+                    catch { /* 回滚阶段忽略二次异常 */ }
+                }
+                throw;
+            }
 
+            _initOrder = sortedOrder;
+            _updateModules = updateModules;
+            _lateUpdateModules = lateUpdateModules;
             _initialized = true;
         }
 
@@ -129,9 +150,11 @@ namespace TryGet
             if (!_initialized)
                 throw new InvalidOperationException("Update requires Initialize first.");
 
-            for (int i = 0; i < _updateModules.Count; i++)
+            // 本地变量防御：Module.Update 中若调用 Shutdown 会把字段置 null
+            var list = _updateModules;
+            for (int i = 0; i < list.Count; i++)
             {
-                _updateModules[i].Update(deltaTime, unscaledDeltaTime);
+                list[i].Update(deltaTime, unscaledDeltaTime);
             }
         }
 
@@ -143,14 +166,16 @@ namespace TryGet
             if (!_initialized)
                 throw new InvalidOperationException("LateUpdate requires Initialize first.");
 
-            for (int i = 0; i < _lateUpdateModules.Count; i++)
+            var list = _lateUpdateModules;
+            for (int i = 0; i < list.Count; i++)
             {
-                _lateUpdateModules[i].LateUpdate(deltaTime, unscaledDeltaTime);
+                list[i].LateUpdate(deltaTime, unscaledDeltaTime);
             }
         }
 
         /// <summary>
         /// 按 Initialize 逆序 Shutdown 所有 Module。允许多次调用。
+        /// 单 Module 抛异常不中断后续 Module Shutdown，最终聚合抛 <see cref="ModuleShutdownException"/>。
         /// </summary>
         public void Shutdown()
         {
@@ -158,12 +183,23 @@ namespace TryGet
                 return;
 
             var shutdown = new HashSet<IModule>();
+            List<Exception> failures = null;
+
             for (int i = _initOrder.Count - 1; i >= 0; i--)
             {
                 var module = _initOrder[i];
-                if (shutdown.Add(module))
+                if (!shutdown.Add(module))
+                    continue;
+
+                try
                 {
                     module.Shutdown();
+                }
+                catch (Exception ex)
+                {
+                    if (failures == null)
+                        failures = new List<Exception>();
+                    failures.Add(ex);
                 }
             }
 
@@ -171,19 +207,18 @@ namespace TryGet
             _initOrder = null;
             _updateModules = null;
             _lateUpdateModules = null;
+
+            if (failures != null)
+                throw new ModuleShutdownException(failures);
         }
 
         #endregion
 
         #region Topological Sort
 
-        /// <summary>
-        /// 基于 Kahn 算法的拓扑排序。Priority 作 tie-breaker（同一拓扑层级内按 Priority 升序）。
-        /// 检测循环依赖和未注册依赖，发现时抛 InvalidOperationException。
-        /// </summary>
         private List<IModule> TopologicalSort()
         {
-            // 去重：同实例多接口只算一次节点
+            // 去重：同实例多接口只算一个节点
             var allModules = new List<IModule>();
             var seen = new HashSet<IModule>();
             foreach (var kv in _modulesByInterface)
@@ -192,8 +227,6 @@ namespace TryGet
                     allModules.Add(kv.Value);
             }
 
-            // 入度统计：以"接口类型"为节点
-            // module → 它依赖的其他 module 实例
             var dependsOn = new Dictionary<IModule, List<IModule>>();
             var dependedBy = new Dictionary<IModule, List<IModule>>();
 
@@ -205,21 +238,18 @@ namespace TryGet
 
             foreach (var module in allModules)
             {
-                foreach (var depType in module.DependsOn)
+                // DependsOn 返回 null 视为空集合（防御）
+                IReadOnlyList<Type> deps = module.DependsOn ?? Array.Empty<Type>();
+
+                foreach (var depType in deps)
                 {
                     if (!_modulesByInterface.TryGetValue(depType, out var depModule))
-                    {
-                        throw new InvalidOperationException(
-                            $"Module {module.GetType().Name} declares dependency on {depType.Name}, but no such Module is registered.");
-                    }
+                        throw new ModuleDependencyMissingException(module.GetType(), depType);
 
                     if (depModule == module)
-                    {
                         throw new InvalidOperationException(
                             $"Module {module.GetType().Name} declares dependency on itself ({depType.Name}).");
-                    }
 
-                    // 同实例多接口注册：跳过自依赖（来自不同接口指向同实例）
                     if (!dependsOn[module].Contains(depModule))
                     {
                         dependsOn[module].Add(depModule);
@@ -228,7 +258,6 @@ namespace TryGet
                 }
             }
 
-            // Kahn 算法：入度 0 的节点入 ready 队列，按 Priority 排序
             var ready = new List<IModule>();
             foreach (var module in allModules)
             {
@@ -239,7 +268,6 @@ namespace TryGet
             var result = new List<IModule>(allModules.Count);
             while (ready.Count > 0)
             {
-                // tie-breaker：同一层级按 Priority 升序，相同 Priority 按 Type 全名稳定
                 ready.Sort(CompareByPriorityAndType);
                 var picked = ready[0];
                 ready.RemoveAt(0);
@@ -261,8 +289,7 @@ namespace TryGet
                     if (!result.Contains(module))
                         remaining.Add(module.GetType().Name);
                 }
-                throw new InvalidOperationException(
-                    "Circular dependency detected among Modules: " + string.Join(", ", remaining));
+                throw new ModuleCircularDependencyException(remaining);
             }
 
             return result;
