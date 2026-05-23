@@ -55,10 +55,10 @@ namespace TryGet
         void AddSystemGroup(SystemGroup group, Phase phase);
 
         /// <summary>
-        /// 直接 API：执行 Enter Phase（不通过 ModuleHost 时使用）。
-        /// 通过 ModuleHost 时由 <see cref="IModule.OnInit"/> 自动触发。
+        /// World 级别局部事件总线（与 ModuleHost.EventBus 全局事件总线区分）。
+        /// 详见 ADR-0010；V0.4 计划合并到 ModuleHost.EventBus。
         /// </summary>
-        void Start();
+        IWorldEventBus EventBus { get; }
     }
 
     /// <summary>

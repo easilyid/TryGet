@@ -52,7 +52,13 @@ namespace TryGet
 
         /// <summary>
         /// IModule.OnInit：触发 Enter Phase。
-        /// 测试中也可以直接调用 <see cref="Start"/>（旧 V0.1 API），不必经过 ModuleHost。
+        ///
+        /// 双轨 API 语义（V0.1 兼容）：
+        /// - 直接使用：用户先调 <see cref="Start"/>，再可选注册到 ModuleHost；OnInit 此时不重复启动。
+        /// - ModuleHost 驱动：host.Initialize() 时此方法触发 Start。
+        ///
+        /// host 参数当前未使用：V0.3 EntityWorld 不依赖其他 Module。未来若需要拉 ILogModule，
+        /// 应改 <see cref="DependsOn"/> 显式声明依赖（ADR-0011 §3）。
         /// </summary>
         public void OnInit(IModuleHost host)
         {
@@ -201,9 +207,15 @@ namespace TryGet
         /// <summary>
         /// IUpdateModule.Update：执行 Update Phase 中所有 System。
         /// V0.3 起取代 V0.1 的无参 Update()——deltaTime 参数留作未来 System 拿。
+        ///
+        /// 状态宽容：Shutdown 后静默 return（其他 Module 可能已先关闭 EntityWorld）；
+        /// Created / Entering / Exiting 仍抛 — 这些是错误状态而非正常关闭路径。
         /// </summary>
         public void Update(float deltaTime, float unscaledDeltaTime)
         {
+            if (_state == EntityWorldState.Shutdown)
+                return;
+
             if (_state != EntityWorldState.Running)
                 throw new InvalidOperationException($"EntityWorld cannot Update in state {_state}.");
 
