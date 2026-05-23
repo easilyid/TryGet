@@ -56,6 +56,10 @@ namespace TryGet
         /// <summary>
         /// 返回此 Aspect 的类型标识，用于 Query 匹配和唯一性约束。
         /// 默认使用运行时类型。
+        ///
+        /// **V0.3 废弃警告**：重写 AspectType 返回非 GetType() 的类型会导致
+        /// Entity.HasAspect&lt;T&gt;() / Query.WithAll&lt;T&gt;() 与 Attach 时注册的 mask 位不一致
+        /// （静默漏匹配）。V0.4 计划移除 virtual，统一用 GetType()。新代码请勿重写此属性。
         /// </summary>
         public virtual Type AspectType => GetType();
     }

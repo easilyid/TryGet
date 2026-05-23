@@ -53,15 +53,25 @@ namespace TryGet
         /// 挂载 Aspect 到此 Entity。
         ///
         /// 异常安全：OnAttach 抛出时完整回滚（_aspects / _aspectMask / Owner 三者状态保持一致）。
+        ///
+        /// 一致性纪律（V0.3）：mask 用 aspect.GetType() 注册而非 aspect.AspectType，
+        /// 以确保与 Query.WithAll&lt;T&gt; 用 typeof(T) 的查询路径对齐。AspectType 重写场景
+        /// 会触发 InvalidOperationException 提前发现误用。
         /// </summary>
-        /// <exception cref="InvalidOperationException">Entity 已销毁或已存在同类型 Aspect。</exception>
+        /// <exception cref="InvalidOperationException">Entity 已销毁、已存在同类型 Aspect、或 AspectType 与 GetType 不一致。</exception>
         public void Attach(Aspect aspect)
         {
             ThrowIfDestroyed();
             if (aspect == null)
                 throw new ArgumentNullException(nameof(aspect));
 
-            Type key = aspect.AspectType;
+            Type runtimeType = aspect.GetType();
+            if (aspect.AspectType != runtimeType)
+                throw new InvalidOperationException(
+                    $"Aspect.AspectType ({aspect.AspectType.Name}) must equal GetType() ({runtimeType.Name}). " +
+                    "Overriding AspectType is deprecated (V0.4 removal); see Aspect.AspectType XML doc.");
+
+            Type key = runtimeType;
             if (_aspects.ContainsKey(key))
                 throw new InvalidOperationException($"Entity {_id} already has Aspect of type {key.Name}.");
 
@@ -314,11 +324,13 @@ namespace TryGet
 
             _destroyed = true;
 
-            // 卸载所有 Aspect（逆序概念上的清理）
+            // 卸载所有 Aspect（逆序概念上的清理）。Destroy 路径吞 OnDetach 异常，
+            // 避免半残状态——确保 mask/dict/Owner 在 destroy 后始终一致。
             var aspects = new List<Aspect>(_aspects.Values);
             for (int i = aspects.Count - 1; i >= 0; i--)
             {
-                aspects[i].OnDetach();
+                try { aspects[i].OnDetach(); }
+                catch { /* destroy 路径吞异常，保证清理继续 */ }
                 aspects[i].ClearOwner();
             }
             _aspects.Clear();

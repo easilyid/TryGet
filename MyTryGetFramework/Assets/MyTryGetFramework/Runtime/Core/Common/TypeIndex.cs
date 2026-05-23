@@ -13,6 +13,11 @@ namespace TryGet
     ///
     /// 超过 <see cref="BitArray256.Capacity"/> 类型时 <see cref="TypeRegistry.GetOrAllocate"/> 抛
     /// <see cref="TypeIndexOverflowException"/>。
+    ///
+    /// **测试隔离警告**：<see cref="TypeRegistry.ResetForTests"/> 重置 TypeRegistry 的 _next 与字典，
+    /// 但 <see cref="TypeIndex{T}.Index"/> 是 static readonly field，**重置后此 cached idx 不变**。
+    /// 跨测试调用 ResetForTests 时，已访问过 TypeIndex&lt;T&gt; 的类型仍持旧 idx，可能与新分配冲突。
+    /// 仅在受控顺序的"批量分配测试"中使用，避免与 Entity/Query 测试共用。
     /// </summary>
     /// <typeparam name="T">Aspect 或 Tag 类型。</typeparam>
     public static class TypeIndex<T>

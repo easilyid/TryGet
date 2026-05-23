@@ -12,6 +12,7 @@ namespace TryGet
         private IProcedure _current;
         private string _currentId;
         private IModuleHost _host;
+        private bool _isTransitioning;
 
         // 介于 EntityWorld (-100) 与业务 Module (0) 之间：
         // Procedure 在 World 启动后驱动游戏流程，但业务 Module 可依赖 IProcedureModule 拉取当前状态。
@@ -77,13 +78,33 @@ namespace TryGet
                 throw new ArgumentException("Target procedure id must be non-empty.", nameof(target));
             if (!_procedures.TryGetValue(target, out var next))
                 throw new InvalidOperationException($"Procedure '{target}' not registered.");
+            if (_isTransitioning)
+                throw new InvalidOperationException(
+                    "Re-entrant TransitionTo: cannot call TransitionTo from within OnEnter / OnExit. " +
+                    "If you need conditional re-transition, defer to next OnUpdate.");
 
-            // 同状态切换允许（Exit → Enter 重启语义）
-            var prev = _current;
-            prev.OnExit(this);
-            _current = next;
-            _currentId = target;
-            _current.OnEnter(this);
+            _isTransitioning = true;
+            try
+            {
+                // 同状态切换允许（Exit → Enter 重启语义）
+                var prev = _current;
+                try
+                {
+                    prev.OnExit(this);
+                }
+                catch
+                {
+                    // OnExit 抛出：保留 prev 为 current，状态机不切换。让调用方决定如何修复。
+                    throw;
+                }
+                _current = next;
+                _currentId = target;
+                _current.OnEnter(this);
+            }
+            finally
+            {
+                _isTransitioning = false;
+            }
         }
 
         public void Stop()
@@ -91,7 +112,9 @@ namespace TryGet
             if (_current == null)
                 return;
 
-            _current.OnExit(this);
+            // 与 Shutdown 对称：吞 OnExit 异常，避免半停状态（让"停"始终成功）
+            try { _current.OnExit(this); }
+            catch { /* swallow，保持与 Shutdown 一致 */ }
             _current = null;
             _currentId = null;
         }
