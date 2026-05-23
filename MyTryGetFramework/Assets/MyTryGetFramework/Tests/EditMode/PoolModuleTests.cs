@@ -1,0 +1,228 @@
+using System;
+using NUnit.Framework;
+
+namespace TryGet.Tests
+{
+    /// <summary>
+    /// PoolModule（IPoolModule + 内部 ObjectPool）的 EditMode 测试。
+    /// </summary>
+    [TestFixture]
+    public class PoolModuleTests
+    {
+        private class Dummy
+        {
+            public int Tag;
+        }
+
+        private class Other
+        {
+            public string Name;
+        }
+
+        [Test]
+        public void Priority_IsHalfTrack()
+        {
+            var p = new PoolModule();
+            Assert.AreEqual(-500, p.Priority);
+        }
+
+        [Test]
+        public void DependsOn_IsEmpty()
+        {
+            var p = new PoolModule();
+            Assert.AreEqual(0, p.DependsOn.Count);
+        }
+
+        [Test]
+        public void GetOrCreatePool_FirstCall_CreatesPool()
+        {
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+            Assert.IsNotNull(pool);
+            Assert.AreEqual(0, pool.IdleCount);
+        }
+
+        [Test]
+        public void GetOrCreatePool_SecondCallSameType_ReturnsSameInstance()
+        {
+            var p = new PoolModule();
+            var pool1 = p.GetOrCreatePool(() => new Dummy());
+            var pool2 = p.GetOrCreatePool(() => new Dummy());
+            Assert.AreSame(pool1, pool2);
+        }
+
+        [Test]
+        public void GetOrCreatePool_DifferentTypes_ReturnDifferentPools()
+        {
+            var p = new PoolModule();
+            var poolA = p.GetOrCreatePool(() => new Dummy());
+            var poolB = p.GetOrCreatePool(() => new Other());
+
+            Assert.AreNotSame((object)poolA, (object)poolB);
+        }
+
+        [Test]
+        public void GetOrCreatePool_NullFactory_Throws()
+        {
+            var p = new PoolModule();
+            Assert.Throws<ArgumentNullException>(() => p.GetOrCreatePool<Dummy>(null));
+        }
+
+        [Test]
+        public void GetOrCreatePool_NegativeInitialSize_Throws()
+        {
+            var p = new PoolModule();
+            Assert.Throws<ArgumentOutOfRangeException>(() => p.GetOrCreatePool(() => new Dummy(), initialSize: -1));
+        }
+
+        [Test]
+        public void GetOrCreatePool_InitialSize_PrefillsIdleCount()
+        {
+            var p = new PoolModule();
+            int created = 0;
+            var pool = p.GetOrCreatePool(() => { created++; return new Dummy(); }, initialSize: 3);
+
+            Assert.AreEqual(3, pool.IdleCount);
+            Assert.AreEqual(3, created);
+        }
+
+        [Test]
+        public void Rent_EmptyPool_CallsFactory()
+        {
+            var p = new PoolModule();
+            int created = 0;
+            var pool = p.GetOrCreatePool(() => { created++; return new Dummy(); });
+
+            var item = pool.Rent();
+
+            Assert.IsNotNull(item);
+            Assert.AreEqual(1, created);
+            Assert.AreEqual(0, pool.IdleCount);
+        }
+
+        [Test]
+        public void Rent_NonEmptyPool_DoesNotCallFactory()
+        {
+            var p = new PoolModule();
+            int created = 0;
+            var pool = p.GetOrCreatePool(() => { created++; return new Dummy(); }, initialSize: 2);
+            Assert.AreEqual(2, created);  // initial 预填
+
+            var item = pool.Rent();
+
+            Assert.IsNotNull(item);
+            Assert.AreEqual(2, created, "Rent 从池里取，不应再触发工厂");
+            Assert.AreEqual(1, pool.IdleCount);
+        }
+
+        [Test]
+        public void Return_IncrementsIdleCount()
+        {
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+
+            pool.Return(new Dummy());
+            pool.Return(new Dummy());
+
+            Assert.AreEqual(2, pool.IdleCount);
+        }
+
+        [Test]
+        public void Return_InvokesOnReturnHook()
+        {
+            var p = new PoolModule();
+            int resets = 0;
+            var pool = p.GetOrCreatePool(() => new Dummy(),
+                onReturn: d => { resets++; d.Tag = 0; });
+
+            var d = new Dummy { Tag = 42 };
+            pool.Return(d);
+
+            Assert.AreEqual(1, resets);
+            Assert.AreEqual(0, d.Tag);
+        }
+
+        [Test]
+        public void Return_NullItem_IsIgnored()
+        {
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+
+            pool.Return(null);
+
+            Assert.AreEqual(0, pool.IdleCount);
+        }
+
+        [Test]
+        public void RentReturnCycle_ReusesSameInstance()
+        {
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+
+            var first = pool.Rent();
+            pool.Return(first);
+            var second = pool.Rent();
+
+            Assert.AreSame(first, second);
+        }
+
+        [Test]
+        public void DestroyPool_RemovesExisting_ReturnsTrue()
+        {
+            var p = new PoolModule();
+            p.GetOrCreatePool(() => new Dummy());
+
+            Assert.IsTrue(p.DestroyPool<Dummy>());
+        }
+
+        [Test]
+        public void DestroyPool_NoSuchType_ReturnsFalse()
+        {
+            var p = new PoolModule();
+            Assert.IsFalse(p.DestroyPool<Dummy>());
+        }
+
+        [Test]
+        public void DestroyPool_AfterDestroy_GetOrCreateReturnsFreshPool()
+        {
+            var p = new PoolModule();
+            var poolA = p.GetOrCreatePool(() => new Dummy(), initialSize: 2);
+            p.DestroyPool<Dummy>();
+
+            var poolB = p.GetOrCreatePool(() => new Dummy());
+
+            Assert.AreNotSame(poolA, poolB);
+            Assert.AreEqual(0, poolB.IdleCount, "新池没有继承旧池的预填");
+        }
+
+        [Test]
+        public void Shutdown_ClearsAllPools()
+        {
+            var p = new PoolModule();
+            p.GetOrCreatePool(() => new Dummy());
+            p.GetOrCreatePool(() => new Other());
+
+            p.Shutdown();
+
+            // Shutdown 后再 GetOrCreate 应得到新池而非旧池
+            var freshA = p.GetOrCreatePool(() => new Dummy(), initialSize: 2);
+            Assert.AreEqual(2, freshA.IdleCount);
+        }
+
+        [Test]
+        public void IntegratesWithModuleHost()
+        {
+            var host = new ModuleHost();
+            var pools = new PoolModule();
+            host.Register<IPoolModule>(pools);
+            host.Initialize();
+
+            var pool = host.Get<IPoolModule>().GetOrCreatePool(() => new Dummy());
+            var d = pool.Rent();
+            pool.Return(d);
+            Assert.AreEqual(1, pool.IdleCount);
+
+            host.Shutdown();
+        }
+    }
+}
