@@ -14,6 +14,11 @@ namespace TryGet
         private readonly Dictionary<Type, Aspect> _aspects = new Dictionary<Type, Aspect>();
         private readonly HashSet<Type> _tags = new HashSet<Type>();
 
+        // V0.3：类型索引位掩码镜像。GetAspect 仍走 _aspects 取实例；
+        // Query.Matches 走 mask 加速（O(1) 位运算替代 O(n) Dictionary 查找）。
+        private BitArray256 _aspectMask;
+        private BitArray256 _tagMask;
+
         private Entity _parent;
         private readonly List<Entity> _children = new List<Entity>();
         private readonly EntityEventDispatcher _eventDispatcher;
@@ -30,6 +35,12 @@ namespace TryGet
         public EntityId Id => _id;
         public EntityWorld World => _world;
         public bool IsDestroyed => _destroyed;
+
+        /// <summary>框架内部：暴露给 Query.Matches 做位运算。</summary>
+        internal BitArray256 AspectMask => _aspectMask;
+
+        /// <summary>框架内部：暴露给 Query.Matches 做位运算。</summary>
+        internal BitArray256 TagMask => _tagMask;
 
         /// <summary>
         /// 获取此 Entity 的弱引用 Handle。
@@ -53,6 +64,7 @@ namespace TryGet
                 throw new InvalidOperationException($"Entity {_id} already has Aspect of type {key.Name}.");
 
             _aspects[key] = aspect;
+            _aspectMask.Add(TypeRegistry.GetOrAllocate(key));
             aspect.SetOwner(this, _eventDispatcher);
             aspect.OnAttach();
         }
@@ -72,6 +84,8 @@ namespace TryGet
                 return false;
 
             _aspects.Remove(key);
+            if (TypeRegistry.TryGet(key, out int idx))
+                _aspectMask.Remove(idx);
             aspect.OnDetach();
             aspect.ClearOwner();
             return true;
@@ -99,19 +113,19 @@ namespace TryGet
         }
 
         /// <summary>
-        /// 是否拥有指定类型的 Aspect。
+        /// 是否拥有指定类型的 Aspect。V0.3 起走位运算 O(1)。
         /// </summary>
         public bool HasAspect<T>() where T : Aspect
         {
-            return _aspects.ContainsKey(typeof(T));
+            return _aspectMask.Contains(TypeIndex<T>.Index);
         }
 
         /// <summary>
-        /// 是否拥有指定类型的 Aspect。
+        /// 是否拥有指定类型的 Aspect（Type 版本）。
         /// </summary>
         public bool HasAspect(Type aspectType)
         {
-            return _aspects.ContainsKey(aspectType);
+            return TypeRegistry.TryGet(aspectType, out int idx) && _aspectMask.Contains(idx);
         }
 
         /// <summary>
@@ -134,7 +148,12 @@ namespace TryGet
         public bool AddTag<T>() where T : Tag
         {
             ThrowIfDestroyed();
-            return _tags.Add(typeof(T));
+            if (_tags.Add(typeof(T)))
+            {
+                _tagMask.Add(TypeIndex<T>.Index);
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -143,23 +162,28 @@ namespace TryGet
         public bool RemoveTag<T>() where T : Tag
         {
             ThrowIfDestroyed();
-            return _tags.Remove(typeof(T));
+            if (_tags.Remove(typeof(T)))
+            {
+                _tagMask.Remove(TypeIndex<T>.Index);
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
-        /// 是否拥有指定 Tag。
+        /// 是否拥有指定 Tag。V0.3 起走位运算 O(1)。
         /// </summary>
         public bool HasTag<T>() where T : Tag
         {
-            return _tags.Contains(typeof(T));
+            return _tagMask.Contains(TypeIndex<T>.Index);
         }
 
         /// <summary>
-        /// 是否拥有指定类型的 Tag。
+        /// 是否拥有指定类型的 Tag（Type 版本）。
         /// </summary>
         public bool HasTag(Type tagType)
         {
-            return _tags.Contains(tagType);
+            return TypeRegistry.TryGet(tagType, out int idx) && _tagMask.Contains(idx);
         }
 
         #endregion
@@ -264,6 +288,8 @@ namespace TryGet
             }
             _aspects.Clear();
             _tags.Clear();
+            _aspectMask.Clear();
+            _tagMask.Clear();
             _eventDispatcher.Clear();
 
             // 从父级移除
