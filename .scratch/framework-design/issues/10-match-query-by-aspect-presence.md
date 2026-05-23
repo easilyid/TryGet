@@ -12,16 +12,19 @@ Status: ready-for-agent
 
 ## Acceptance criteria
 
-- [ ] Query 可以匹配拥有指定 Aspect 的 Entity。
-- [ ] Query 可以匹配同时拥有多个 Aspect 的 Entity。
+- [ ] Query 可以匹配拥有指定 Aspect 的 Entity（All-of 语义）。
+- [ ] Query 可以匹配同时拥有多个 Aspect 的 Entity（All-of 组合）。
+- [ ] Query 可以排除拥有指定 Aspect 的 Entity（None-of 语义，ADR-0009）。
 - [ ] Query 只匹配同一 World 内的 Entity。
 - [ ] Query 不匹配已销毁 Entity。
 - [ ] Query API 不暴露 SQL、脚本或通用 predicate 语义。
 
 ## Testing
 
-- [ ] 测试单 Aspect Query。
-- [ ] 测试多 Aspect Query。
+- [ ] 测试单 Aspect All-of Query。
+- [ ] 测试多 Aspect All-of Query。
+- [ ] 测试 None-of 排除匹配。
+- [ ] 测试 All-of + None-of 组合。
 - [ ] 测试跨 World Entity 不进入结果。
 - [ ] 测试销毁 Entity 后 Query 结果更新。
 

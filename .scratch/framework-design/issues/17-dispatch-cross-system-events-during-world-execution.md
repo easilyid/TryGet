@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: deferred-to-post-v0.1
 
 # Dispatch cross-System Events during World execution
 

@@ -108,6 +108,27 @@ _Avoid_: World, Runtime
 - "Tag" (标签) 绝不承载状态；如果存在状态，它应该属于一个 **Aspect**。
 - "Query" (查询) 保持在 System 端的过滤模型层面，不能变成一种脚本语言。
 
+## Design constraints (设计约束 — 源自 ADR-0007~0010)
+
+**Aspect behavior scope (ADR-0007):**
+- 允许：操作自身字段的验证、计算、状态转换方法；发布 Entity-level Event。
+- 禁止：访问其他 Aspect、Entity、World 或外部服务；持有非自身字段的引用。
+- 边界：需要自身字段之外知识的方法属于 System。
+
+**System registration (ADR-0008):**
+- System 通过显式 API 注册到 World（非反射、非 Attribute 扫描）。
+- 每个 System 在注册时声明所属 SystemGroup 和 Phase（Enter/Update/Exit）。
+- SystemGroup 内的执行顺序 = 注册顺序。
+- System 可持有跨 Entity 状态（计时器/缓存），但禁止持有单 Entity 能力状态。
+
+**Query semantics (ADR-0009):**
+- V0.1 支持 All-of（全部包含）和 None-of（排除）两种谓词。
+- Any-of 推迟到 V0.1 之后。
+
+**Event scope (ADR-0010):**
+- V0.1 实现 Entity-level Event 和 World-level Event 两层。
+- Cross-System Event 推迟到 V0.1 之后（World-level Event 已覆盖 System 间通信）。
+
 ## V0.1 scope (V0.1 范围)
 
 V0.1 仅涵盖核心运行时骨架：**World**, **Entity**, **Aspect**, **System**, **Adapter**, **Phase**, **SystemGroup**，以及使这些术语更精确所需的最小配套词汇。编辑器工具、资源管线、热重载、网络和完整的配置系统都**有意地不在本次范围内** (out of scope)。

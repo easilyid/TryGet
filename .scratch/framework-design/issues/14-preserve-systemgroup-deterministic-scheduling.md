@@ -27,4 +27,5 @@ Status: ready-for-agent
 
 ## Blocked by
 
+- .scratch/framework-design/issues/12-run-fixed-enter-update-and-exit-phases.md
 - .scratch/framework-design/issues/13-run-a-system-over-query-selected-entities.md
