@@ -2,6 +2,85 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.4（Common Modules 五件套）
+
+### 迭代 0 — ResourceModule
+
+**Added**
+- `IResourceModule` 接口：`Load<T>` / `TryLoad<T>` / `Release` / `Register` / `Unregister` / `RegisteredCount`
+- `MemoryResourceModule`：Dictionary<string,object> 实现，Priority=-400，介于 Pool/Timer (-500) 与 EntityWorld (-100) 之间
+- `ResourceNotFoundException` 带 `Path` 属性便于诊断
+- 18 个 EditMode 测试
+
+**Notes**
+- Core 不依赖 YooAsset / Addressables / UniTask（Adapter 层后续迭代提供 YooAssetResourceModule）
+
+### 迭代 1 — UIModule
+
+**Added**
+- `IUIModule` 接口：`Open` / `Close` / `IsOpen` / `OpenedUIs` / `OpenedCount` / `CloseAll`
+- `MemoryUIModule`：List 保插入顺序 + HashSet 保 O(1) IsOpen，Priority=-300
+- 17 个 EditMode 测试
+
+**Notes**
+- Core 只管"哪些 UI 在打开"的状态机，不渲染、不分层、不传参、不 Modal（这些由 Adapters/UGUI 层 UGUIUIModule 扩展）
+- 重复 Open 同名抛 InvalidOperationException；Close 不存在 UI 静默幂等
+
+### 迭代 2 — SaveModule
+
+**Added**
+- `ISaveModule` 接口：`HasKey` / `Get/Set(String|Int|Float|Bool)` / `DeleteKey` / `DeleteAll` / `Save` / `KeyCount`
+- `MemorySaveModule`：单 Dictionary<string,object> 实现（保 KeyCount 准确、同 key 跨类型互斥），Priority=-450
+- 24 个 EditMode 测试
+
+**Notes**
+- 行为对齐 PlayerPrefs：同 key 跨类型 Set 覆盖；Get 类型不匹配/key 不存在返回 defaultValue（读容错）；Set null/empty key 抛 ArgumentException（写强约束）
+- Save() 为 no-op；Adapter 实现负责真正持久化（PlayerPrefs / 本地文件 / 云存档）
+
+### 迭代 3 — LocalizationModule
+
+**Added**
+- `ILocalizationModule` 接口：`CurrentLanguage` / `SetLanguage` / `RegisterTable` / `T(key)` / `T(key, default)` / `TryGet` / `AvailableLanguages` / `RegisteredCount`
+- `MemoryLocalizationModule`：Dictionary<语言, Dictionary<key,值>> 双层表，Priority=-420
+- 23 个 EditMode 测试
+
+**Notes**
+- production-ready 实现（不是 stub），Adapter 层只需"从 Excel/CSV/JSON 加载 + RegisterTable"工厂
+- 与 Unity Localization Package / i18next 共识：T(key) 漏译返回 key 本身（让 UI 立即暴露漏译）
+- RegisterTable 浅拷贝输入 dict 防外部污染；重复注册同语言覆盖；覆盖 current 立即刷新引用
+
+### 迭代 4 — AudioModule
+
+**Added**
+- `AudioCategory` 枚举：BGM / SFX / UI / Voice
+- `IAudioModule` 接口：`Play(cue, category)` / `Stop` / `StopAll(category)` / `StopAllSounds` / `IsPlaying` / `MasterVolume` / `SetMasterVolume` / `GetCategoryVolume` / `SetCategoryVolume` / `PlayingCount`
+- `MemoryAudioModule`：Dictionary<cue, AudioCategory> 状态机 + 4 个 float 存分类音量，Priority=-380
+- 22 个 EditMode 测试
+
+**Notes**
+- Core 不依赖 AudioClip / AudioSource / AudioMixer；Adapters/Unity 层后续 UnityAudioModule 接 AudioSource
+- 同 cue 重复 Play 幂等；音量自动 clamp 到 [0,1]；Shutdown 清空列表 + 重置音量
+
+### 迭代 5 — V0.4 端到端 demo
+
+**Added**
+- `MainMenuFlowDemoTests`：Boot → MainMenu → InGame 三 Procedure 串联 V0.4 五件套全协同
+  - Boot：Save.GetString("lang") → Localization.SetLanguage → Resource.Register UI Prefab → TransitionTo MainMenu
+  - MainMenu：Resource.Load + UI.Open + Audio.Play(BGM) + Localization.T 显示标题
+  - InGame：UI.Open(HUD) + Audio.Play(SFX) + Save.Save 写时间戳
+- 3 个测试：默认 zh-CN 流程、从 Save 恢复 en-US 偏好、Priority 拓扑顺序验证
+
+### V0.4 Module Priority 完整链
+Log(-1000) → Pool/Timer(-500) → Save(-450) → Localization(-420) → Resource(-400) → Audio(-380) → UI(-300) → Procedure(-200) → EntityWorld(-100) → 业务(0)
+
+### Deferred to V0.5
+- **InputModule**：强耦合 Unity InputSystem 包，Core 抽象价值低，留 V0.5 与 UnityInputAdapter 一起做
+- **YooAsset adapter**：V0.5 首推（IResourceModule 接口设计漏没漏，得真实加载验证）
+- **UGUIUIModule adapter**：紧随 YooAsset，配合跑通"加载 Prefab → Open UI"真实闭环
+- **sqlite-net SaveModule adapter**：Core ISaveModule + Memory 已封口，sqlite-net 降级为 Adapter 备选
+
+---
+
 ## V0.3（玩法层增强 + 关键服务）
 
 ### 迭代 0 — EntityWorld 拆分

@@ -332,17 +332,35 @@ public interface IHotfixLoader : IModule
 - [ ] FSM + Procedure 模块
 - [ ] 一个完整 demo（如：登录 Procedure + 主菜单 UI）
 
-### V0.4 — UI / Audio / Input / Save
-**Gate criteria：**
-- [ ] UGUI 视图栈 UIModule
-- [ ] AudioModule
-- [ ] InputModule
-- [ ] SaveModule (sqlite-net)
-- [ ] LocalizationModule
+### V0.4 — Common Modules 五件套（Core 完成、Adapter 留 V0.5）
 
-### V0.5 — Network + Hot Reload
+**Gate criteria（reworded post-hoc，反映实际交付）：**
+- [x] **ResourceModule**（V0.3 漏做、V0.4 补齐合理化）：`IResourceModule` + `MemoryResourceModule` + `ResourceNotFoundException`
+- [x] **UIModule**：`IUIModule` + `MemoryUIModule`（UI 栈状态机，不渲染；UGUI 实现留 Adapters/UGUI）
+- [x] **SaveModule**：`ISaveModule` + `MemorySaveModule`（KV 存档，PlayerPrefs 语义；sqlite-net 降级为 Adapter 备选）
+- [x] **LocalizationModule**：`ILocalizationModule` + `MemoryLocalizationModule`（多语言 KV，production-ready）
+- [x] **AudioModule**：`IAudioModule` + `MemoryAudioModule`（cue + 4 类音量；UnityAudioModule 留 Adapters/Unity）
+- [x] **MainMenuFlowDemoTests**：五件套端到端 demo（启动→读语言→进主菜单→点击→进游戏）
+- [-] **InputModule**：**defer to V0.5** —— rationale：强耦合 Unity InputSystem 包，Core 抽象价值低，与 UnityInputAdapter 一起做更合理
+
+**V0.4 完成纪录：**
+- 5 个 `I{Name}Module` 接口 + 5 个 `Memory*Module` 实现，全部 cross-end 编译通过（Shadow csproj 0 警告 0 错误）
+- 109 个 EditMode 单元测试（Resource 18 / UI 17 / Save 24 / Localization 23 / Audio 22 / Demo 3 + 2 复用） + 1 个端到端 demo
+- Module Priority 完整链：Log(-1000) → Pool/Timer(-500) → Save(-450) → Localization(-420) → Resource(-400) → Audio(-380) → UI(-300) → Procedure(-200) → EntityWorld(-100) → 业务(0)
+- Plan agent 综合验收：五件套接口能支撑"启动→读存档→选语言→进 MainMenu→播 BGM→切场景"完整 UI 游戏闭环
+
+### V0.5 — Adapter 落地 + InputModule + Network + Hot Reload
 **Gate criteria：**
-- [ ] IChannel + IMessageBus 接口
+
+Adapter 优先级链（V0.4 推到 V0.5 的）：
+- [ ] **YooAsset Adapter**（`YooAssetResourceModule`）— 验证 IResourceModule 接口设计是否真撑得起异步/进度/引用计数
+- [ ] **UGUI Adapter**（`UGUIUIModule`）— 配 YooAsset 跑通"加载 Prefab → Open UI"真实闭环；分层 Canvas / Modal / 数据传参在此扩展
+- [ ] **Unity Audio Adapter**（`UnityAudioModule` 接 AudioSource）
+- [ ] **PlayerPrefs Save Adapter**（或 FileBased / sqlite-net Save Adapter）
+
+V0.5 新增：
+- [ ] **InputModule**（V0.4 defer）：`IInputModule` + Adapters/Unity 接 InputSystem 包
+- [ ] `IChannel` + `IMessageBus` 接口
 - [ ] Adapters/Mirror 默认实现
 - [ ] MemoryPack 序列化集成
 - [ ] HybridCLR 集成走 IHotfixLoader
@@ -373,6 +391,7 @@ public interface IHotfixLoader : IModule
 8. **测试不能跨 asmdef 直接 new 内部类型**，必须通过公开 API
 9. **性能定位 < 10000 Entity；超大规模请用 DOTS**
 10. **每个 minor 版本破坏性 API 修改必须升版本 + CHANGELOG**
+11. **Memory*Module 实现纪律**（V0.4 新增）：(a) Write 路径严格（null/empty key 抛、重复 Open 抛）；(b) Read 路径容错（不存在/类型不匹配返回 default/false 而非抛）；(c) Shutdown 回归 OnInit 前态（清数据 + 重置配置）；(d) Memory 实现非线程安全（与全框架 ModuleHost 主线程契约一致）
 
 ## 14. 与 V0.1 的"对话"
 
