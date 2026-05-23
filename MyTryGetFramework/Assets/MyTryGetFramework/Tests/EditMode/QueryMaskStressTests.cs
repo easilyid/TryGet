@@ -9,7 +9,7 @@ namespace TryGet.Tests
     /// V0.3 迭代 1 Query 位运算加速的压力测试 + 行为正确性验证。
     ///
     /// 范围：
-    /// - 10000 Entity × 10 Query 大数据集稳定性（不崩 + 不漏匹配）
+    /// - 10000 Entity × 5 Query 大数据集稳定性（不崩 + 不漏匹配）
     /// - Entity._aspectMask / _tagMask 与 _aspects / _tags 字典一致性
     /// - AspectType 重写场景的 mask 一致性
     /// </summary>

@@ -24,50 +24,67 @@ namespace TryGet
     }
 
     /// <summary>
-    /// 类型 → 稳定 int index 的注册中心。线程不安全（主线程访问）。
+    /// 类型 → 稳定 int index 的注册中心。所有公开 API 均通过 lock 串行化，跨线程安全。
     /// </summary>
     public static class TypeRegistry
     {
         private static readonly Dictionary<Type, int> _indices = new Dictionary<Type, int>(64);
+        private static readonly object _lock = new object();
         private static int _next = 0;
 
         /// <summary>
         /// 已分配的 index 总数（用于诊断）。
         /// </summary>
-        public static int AllocatedCount => _next;
+        public static int AllocatedCount
+        {
+            get { lock (_lock) return _next; }
+        }
 
         /// <summary>
         /// 为类型 <paramref name="type"/> 分配或返回已分配的 index。
         /// 超过 <see cref="BitArray256.Capacity"/> 抛 <see cref="TypeIndexOverflowException"/>。
+        /// 线程安全（lock 串行化）。
         /// </summary>
         public static int GetOrAllocate(Type type)
         {
             if (type == null)
                 throw new ArgumentNullException(nameof(type));
 
-            if (_indices.TryGetValue(type, out int idx))
+            lock (_lock)
+            {
+                if (_indices.TryGetValue(type, out int idx))
+                    return idx;
+
+                if (_next >= BitArray256.Capacity)
+                    throw new TypeIndexOverflowException(type, _next);
+
+                idx = _next++;
+                _indices[type] = idx;
                 return idx;
-
-            if (_next >= BitArray256.Capacity)
-                throw new TypeIndexOverflowException(type, _next);
-
-            idx = _next++;
-            _indices[type] = idx;
-            return idx;
+            }
         }
 
         /// <summary>
         /// 尝试查询类型已分配的 index（不会触发新分配）。
         /// </summary>
-        public static bool TryGet(Type type, out int index) => _indices.TryGetValue(type, out index);
+        public static bool TryGet(Type type, out int index)
+        {
+            lock (_lock)
+            {
+                return _indices.TryGetValue(type, out index);
+            }
+        }
 
         /// <summary>
         /// 仅供测试：清空注册中心。生产代码禁止调用。
         /// </summary>
         internal static void ResetForTests()
         {
-            _indices.Clear();
-            _next = 0;
+            lock (_lock)
+            {
+                _indices.Clear();
+                _next = 0;
+            }
         }
     }
 

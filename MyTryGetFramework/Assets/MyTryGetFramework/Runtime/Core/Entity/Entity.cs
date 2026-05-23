@@ -51,6 +51,8 @@ namespace TryGet
 
         /// <summary>
         /// 挂载 Aspect 到此 Entity。
+        ///
+        /// 异常安全：OnAttach 抛出时完整回滚（_aspects / _aspectMask / Owner 三者状态保持一致）。
         /// </summary>
         /// <exception cref="InvalidOperationException">Entity 已销毁或已存在同类型 Aspect。</exception>
         public void Attach(Aspect aspect)
@@ -63,14 +65,29 @@ namespace TryGet
             if (_aspects.ContainsKey(key))
                 throw new InvalidOperationException($"Entity {_id} already has Aspect of type {key.Name}.");
 
+            int idx = TypeRegistry.GetOrAllocate(key);
             _aspects[key] = aspect;
-            _aspectMask.Add(TypeRegistry.GetOrAllocate(key));
+            _aspectMask.Add(idx);
             aspect.SetOwner(this, _eventDispatcher);
-            aspect.OnAttach();
+
+            try
+            {
+                aspect.OnAttach();
+            }
+            catch
+            {
+                // 回滚：保证 mask + dict + Owner 三者状态一致
+                _aspects.Remove(key);
+                _aspectMask.Remove(idx);
+                aspect.ClearOwner();
+                throw;
+            }
         }
 
         /// <summary>
         /// 从此 Entity 卸载 Aspect。
+        ///
+        /// 异常安全：OnDetach 抛出时完整回滚（_aspects / _aspectMask 恢复，Owner 不被清除以提示"未完全 detach"）。
         /// </summary>
         /// <returns>是否成功卸载。</returns>
         public bool Detach(Aspect aspect)
@@ -84,9 +101,27 @@ namespace TryGet
                 return false;
 
             _aspects.Remove(key);
+            bool maskWasRemoved = false;
+            int removedIdx = 0;
             if (TypeRegistry.TryGet(key, out int idx))
+            {
                 _aspectMask.Remove(idx);
-            aspect.OnDetach();
+                removedIdx = idx;
+                maskWasRemoved = true;
+            }
+
+            try
+            {
+                aspect.OnDetach();
+            }
+            catch
+            {
+                // 回滚 _aspects / _aspectMask；Owner 保留（让 Aspect 自我观测"detach 未完成"状态）
+                _aspects[key] = aspect;
+                if (maskWasRemoved) _aspectMask.Add(removedIdx);
+                throw;
+            }
+
             aspect.ClearOwner();
             return true;
         }
