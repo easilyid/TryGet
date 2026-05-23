@@ -2,6 +2,68 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.5（进行中 — Core 服务补齐 + InputModule）
+
+### 迭代 0 — InputModule（V0.4 deferred 补齐）
+
+**Added**
+- `IInputModule` 接口：按 Action 名查询输入（IsPressed / WasPressedThisFrame / WasReleasedThisFrame / GetAxis / GetAxis2D / ActiveCount）
+- `MemoryInputModule`：3 HashSet 区分 _pressed / _pressedThisFrame / _releasedThisFrame；
+  SimulatePress / SimulateRelease / SetAxis / SetAxis2D 测试 API；
+  Axis 自动 clamp 到 [-1, 1]；同帧 Press→Release 两个 edge 都保留 true（与 Unity 一致）
+- 22 个 EditMode 测试
+
+### 迭代 1 — ConfigModule（V0.3 deferred 补齐）
+
+**Added**
+- `IConfigModule` 接口：Register / Get / TryGet / Has / Unregister / RegisteredCount
+- `MemoryConfigModule`：Dictionary<string,object>，Priority=-460（最早一批服务）
+- `ConfigNotFoundException` 带 Key 属性
+- 21 个 EditMode 测试
+
+**Notes**
+- 与 IResourceModule 语义区分：Resource 加载运行时对象（Prefab/AudioClip），Config 查询业务表数据（武器表/关卡表）
+
+### 迭代 2 — SceneModule
+
+**Added**
+- `ISceneModule` 接口：Load / Unload / SetActive / IsLoaded / ActiveScene / LoadedScenes / UnloadAll / LoadedCount
+- `MemorySceneModule`：List 保插入顺序 + HashSet O(1) IsLoaded + active 字符串引用，Priority=-250
+- 19 个 EditMode 测试
+
+**Notes**
+- 默认 additive 加载语义（与 Unity LoadSceneMode.Additive 一致）
+- 首个加载场景自动成为 ActiveScene；卸载 active 后 ActiveScene 置 null
+
+### 迭代 3 — SceneFlowDemoTests 端到端 demo + Input edge 调度 bugfix
+
+**Fixed**
+- `MemoryInputModule` 从 `IUpdateModule` 改为 `ILateUpdateModule`：
+  Update 调度按 Priority 升序，Input (-350) 在 Procedure (-200) 之前 Update，
+  会先清掉 _pressedThisFrame 导致业务永远看不到本帧输入。改 LateUpdate 后业务在 Update 阶段消费 edge，host.LateUpdate 后才清空，与 Unity Input.GetKeyDown 行为一致
+
+**Added**
+- `SceneFlowDemoTests`：V0.5 端到端 demo，MainMenu → press Confirm → Battle 流程
+  串联 V0.5 三件套（Input/Config/Scene）+ V0.4 Audio
+- 2 测试：完整流程 + Input edge 调度顺序验证
+
+### V0.5 Module Priority 链（进行中）
+Log(-1000) → Pool/Timer(-500) → Config(-460) → Save(-450) → Localization(-420) →
+Resource(-400) → Audio(-380) → Input(-350) → UI(-300) → Scene(-250) →
+Procedure(-200) → EntityWorld(-100) → 业务(0)
+
+### V0.5 Gate 剩余项（待做）
+- [ ] NetworkModule（IChannel + IMessageBus 接口）
+- [ ] Adapters/Mirror 默认实现
+- [ ] MemoryPack 序列化集成
+- [ ] HybridCLR IHotfixLoader 接口 + 实现
+- [ ] YooAsset Adapter（IResourceModule 落地真实加载）
+- [ ] UGUI Adapter（IUIModule 落地真实渲染）
+- [ ] Unity Audio Adapter（IAudioModule 接 AudioSource）
+- [ ] PlayerPrefs Save Adapter
+
+---
+
 ## V0.4（Common Modules 五件套）
 
 ### 迭代 0 — ResourceModule

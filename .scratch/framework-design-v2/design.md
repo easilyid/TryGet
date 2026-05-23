@@ -349,17 +349,28 @@ public interface IHotfixLoader : IModule
 - Module Priority 完整链：Log(-1000) → Pool/Timer(-500) → Save(-450) → Localization(-420) → Resource(-400) → Audio(-380) → UI(-300) → Procedure(-200) → EntityWorld(-100) → 业务(0)
 - Plan agent 综合验收：五件套接口能支撑"启动→读存档→选语言→进 MainMenu→播 BGM→切场景"完整 UI 游戏闭环
 
-### V0.5 — Adapter 落地 + InputModule + Network + Hot Reload
+### V0.5 — Core 服务补齐 + InputModule + Network + Hot Reload（进行中）
 **Gate criteria：**
 
-Adapter 优先级链（V0.4 推到 V0.5 的）：
-- [ ] **YooAsset Adapter**（`YooAssetResourceModule`）— 验证 IResourceModule 接口设计是否真撑得起异步/进度/引用计数
-- [ ] **UGUI Adapter**（`UGUIUIModule`）— 配 YooAsset 跑通"加载 Prefab → Open UI"真实闭环；分层 Canvas / Modal / 数据传参在此扩展
-- [ ] **Unity Audio Adapter**（`UnityAudioModule` 接 AudioSource）
-- [ ] **PlayerPrefs Save Adapter**（或 FileBased / sqlite-net Save Adapter）
+Core 模块（已完成）：
+- [x] **InputModule**（V0.4 deferred）：`IInputModule` + `MemoryInputModule`（22 测试）。
+  设计教训：edge-state 模块必须实现 `ILateUpdateModule`（而非 `IUpdateModule`），
+  否则会在业务消费前清边。
+- [x] **ConfigModule**（V0.3 deferred）：`IConfigModule` + `MemoryConfigModule`（21 测试）。
+  与 Resource 区分：Resource 是运行时对象，Config 是业务表数据。
+- [x] **SceneModule**：`ISceneModule` + `MemorySceneModule`（19 测试）。
+  Core 只管"哪些场景已加载、哪个活动"，UnitySceneModule 留 Adapter。
+- [x] **SceneFlowDemoTests**：V0.5 三件套端到端 demo。
 
-V0.5 新增：
-- [ ] **InputModule**（V0.4 defer）：`IInputModule` + Adapters/Unity 接 InputSystem 包
+Adapter 优先级链（V0.4 推到 V0.5 的，仍待）：
+- [ ] **YooAsset Adapter**（`YooAssetResourceModule`）
+- [ ] **UGUI Adapter**（`UGUIUIModule`）
+- [ ] **Unity Audio Adapter**（`UnityAudioModule` 接 AudioSource）
+- [ ] **PlayerPrefs Save Adapter**（或 FileBased / sqlite-net）
+- [ ] **UnityInputModule Adapter**（接 InputSystem 包）
+- [ ] **UnitySceneModule Adapter**（接 SceneManager.LoadSceneAsync）
+
+V0.5 原计划项（仍待）：
 - [ ] `IChannel` + `IMessageBus` 接口
 - [ ] Adapters/Mirror 默认实现
 - [ ] MemoryPack 序列化集成
