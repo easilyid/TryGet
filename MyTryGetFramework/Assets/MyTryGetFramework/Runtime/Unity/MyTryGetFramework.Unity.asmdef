@@ -1,0 +1,16 @@
+{
+    "name": "MyTryGetFramework.Unity",
+    "rootNamespace": "TryGet.Unity",
+    "references": [
+        "MyTryGetFramework.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
