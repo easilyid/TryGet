@@ -12,8 +12,14 @@ namespace TryGet
     /// </summary>
     public sealed class MemoryAudioModule : IAudioModule
     {
-        // cue → category 映射：用 Dictionary 同时支持 IsPlaying O(1) 与按 category 过滤 StopAll
-        private readonly Dictionary<string, AudioCategory> _playing = new Dictionary<string, AudioCategory>();
+        private struct PlayingEntry
+        {
+            public AudioCategory Category;
+            public bool Paused;
+        }
+
+        // cue → entry：扩展为 struct 以同时存 category 和 paused 状态
+        private readonly Dictionary<string, PlayingEntry> _playing = new Dictionary<string, PlayingEntry>();
         private float _masterVolume = 1f;
         private readonly float[] _categoryVolumes = new float[4]; // BGM/SFX/UI/Voice
 
@@ -45,8 +51,8 @@ namespace TryGet
             if (string.IsNullOrEmpty(cue))
                 throw new ArgumentException("Cue must be non-empty.", nameof(cue));
 
-            // 同 cue 重复 Play：更新 category（业务可能用不同 category 重播同一资源）
-            _playing[cue] = category;
+            // 同 cue 重复 Play：更新 category，清 paused（重新播放隐含恢复）
+            _playing[cue] = new PlayingEntry { Category = category, Paused = false };
         }
 
         public void Stop(string cue)
@@ -62,7 +68,7 @@ namespace TryGet
             List<string> toRemove = null;
             foreach (var kv in _playing)
             {
-                if (kv.Value == category)
+                if (kv.Value.Category == category)
                 {
                     toRemove ??= new List<string>();
                     toRemove.Add(kv.Key);
@@ -100,6 +106,87 @@ namespace TryGet
         public void SetCategoryVolume(AudioCategory category, float volume)
         {
             _categoryVolumes[(int)category] = Clamp01(volume);
+        }
+
+        // V0.5: Pause/Resume
+
+        public bool Pause(string cue)
+        {
+            if (string.IsNullOrEmpty(cue))
+                return false;
+            if (_playing.TryGetValue(cue, out var entry) && !entry.Paused)
+            {
+                entry.Paused = true;
+                _playing[cue] = entry;
+                return true;
+            }
+            return false;
+        }
+
+        public bool Resume(string cue)
+        {
+            if (string.IsNullOrEmpty(cue))
+                return false;
+            if (_playing.TryGetValue(cue, out var entry) && entry.Paused)
+            {
+                entry.Paused = false;
+                _playing[cue] = entry;
+                return true;
+            }
+            return false;
+        }
+
+        public bool IsPaused(string cue)
+        {
+            if (string.IsNullOrEmpty(cue))
+                return false;
+            return _playing.TryGetValue(cue, out var entry) && entry.Paused;
+        }
+
+        public void PauseAll(AudioCategory category)
+        {
+            // 改 Dictionary value 需重新赋值（PlayingEntry 是 struct）
+            // 收集 key 后批量更新
+            List<string> toUpdate = null;
+            foreach (var kv in _playing)
+            {
+                if (kv.Value.Category == category && !kv.Value.Paused)
+                {
+                    toUpdate ??= new List<string>();
+                    toUpdate.Add(kv.Key);
+                }
+            }
+            if (toUpdate != null)
+            {
+                for (int i = 0; i < toUpdate.Count; i++)
+                {
+                    var entry = _playing[toUpdate[i]];
+                    entry.Paused = true;
+                    _playing[toUpdate[i]] = entry;
+                }
+            }
+        }
+
+        public void ResumeAll(AudioCategory category)
+        {
+            List<string> toUpdate = null;
+            foreach (var kv in _playing)
+            {
+                if (kv.Value.Category == category && kv.Value.Paused)
+                {
+                    toUpdate ??= new List<string>();
+                    toUpdate.Add(kv.Key);
+                }
+            }
+            if (toUpdate != null)
+            {
+                for (int i = 0; i < toUpdate.Count; i++)
+                {
+                    var entry = _playing[toUpdate[i]];
+                    entry.Paused = false;
+                    _playing[toUpdate[i]] = entry;
+                }
+            }
         }
 
         private static float Clamp01(float v)

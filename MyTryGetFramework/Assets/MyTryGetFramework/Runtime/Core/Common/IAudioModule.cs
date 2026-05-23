@@ -82,8 +82,34 @@ namespace TryGet
         void SetCategoryVolume(AudioCategory category, float volume);
 
         /// <summary>
-        /// 当前正在播放的 cue 总数。
+        /// 当前正在播放的 cue 总数（包括已暂停的）。
         /// </summary>
         int PlayingCount { get; }
+
+        /// <summary>
+        /// 暂停某 cue（保留在播放列表，IsPlaying 仍 true，但 Adapter 不发声）。
+        /// 未播放/已暂停返回 false。
+        /// </summary>
+        bool Pause(string cue);
+
+        /// <summary>
+        /// 恢复某 cue。未暂停/未播放返回 false。
+        /// </summary>
+        bool Resume(string cue);
+
+        /// <summary>
+        /// 是否已暂停。未播放返回 false。
+        /// </summary>
+        bool IsPaused(string cue);
+
+        /// <summary>
+        /// 暂停某分类全部 cue。
+        /// </summary>
+        void PauseAll(AudioCategory category);
+
+        /// <summary>
+        /// 恢复某分类全部 cue。
+        /// </summary>
+        void ResumeAll(AudioCategory category);
     }
 }
