@@ -52,15 +52,64 @@ Log(-1000) → Pool/Timer(-500) → Config(-460) → Save(-450) → Localization
 Resource(-400) → Audio(-380) → Input(-350) → UI(-300) → Scene(-250) →
 Procedure(-200) → EntityWorld(-100) → 业务(0)
 
+### 迭代 4 — TimerModule 增强
+
+**Added**
+- `ITimerModule.ScheduleRepeat(intervalSeconds, callback)`：周期触发直到 Cancel
+- `ITimerModule.Pause(handle)` / `Resume(handle)` / `IsPaused(handle)`：暂停/恢复（关卡暂停刚需）
+- `TimerModule.Entry` struct 增加 Interval / Repeating / Paused 字段（非破坏性）
+- 16 个 EditMode 测试
+
+**Notes**
+- 周期 timer interval<=0 抛 ArgumentOutOfRangeException（防死循环）
+- 单帧 deltaTime >> interval 时只触发一次（不补帧），避免长时暂停后连发
+
+### 迭代 5 — AudioModule 增强
+
+**Added**
+- `IAudioModule.Pause(cue)` / `Resume(cue)` / `IsPaused(cue)` / `PauseAll(category)` / `ResumeAll(category)`
+- `MemoryAudioModule` 内部 Dictionary 改为 <cue, PlayingEntry>（struct 含 Category + Paused）
+- 17 个 EditMode 测试，含游戏暂停菜单场景验证
+
+**Notes**
+- Pause 后 IsPlaying 仍 true（cue 保留在播放列表，与 Stop 区分）
+- 重新 Play 隐含 Resume（业务"重启"语义）
+
+### 迭代 6 — UnityAudioModule Adapter（第一个 Unity Adapter）
+
+**Added**
+- `Runtime/Unity/Audio/UnityAudioModule.cs`：IAudioModule 的 Unity 实现，基于 AudioSource 池（默认 16）
+- `RegisterClip(cue, AudioClip)` / `UnregisterClip(cue)` API：业务先加载 AudioClip 后注入 Adapter
+- 溢出策略：池满时 FIFO 复用最旧 cue
+- MasterVolume × CategoryVolume 合成 effective volume，Set 时刷新所有在播 AudioSource
+- **新建 Tests/PlayMode test asmdef**（基建）：references Core + Unity + TestRunner，includePlatforms=[] 允许所有平台
+- `UnityAudioModulePlayModeTests` (11 测试) 用 AudioClip.Create 生成 1 秒静音 clip
+
+### 迭代 7 — UnityInputModule Adapter（接 InputSystem 1.18）
+
+**Added**
+- `Runtime/Unity/Input/UnityInputModule.cs`：IInputModule 的 Unity 实现，接 com.unity.inputsystem 1.18.0
+- `RegisterButton(name, binding)` / `RegisterAxis(name, binding)` / `RegisterAxis2D(name, binding)` API：
+  业务用 binding 字符串注册（如 "<Keyboard>/space"），Adapter 内部 new InputAction + Enable + hook performed/canceled
+- ILateUpdateModule：LateUpdate 清 edge buffers（与 MemoryInputModule + V0.5 Iter 3 修正语义一致）
+- Shutdown：DisposeAll 所有 InputAction，释放 OS 输入资源
+- MyTryGetFramework.Unity.asmdef references 加 "Unity.InputSystem"
+- Tests.PlayMode.asmdef references 加 "Unity.InputSystem" + "Unity.InputSystem.TestFramework"
+- `UnityInputModulePlayModeTests` (11 测试) 用 `InputSystem.AddDevice<Keyboard>/<Gamepad>` + `StateEvent.From` 模拟硬件
+
+### V0.5 Module Priority 链（最新）
+Log(-1000) → Pool/Timer(-500) → Config(-460) → Save(-450) → Localization(-420) →
+Resource(-400) → Audio(-380) → Input(-350) → UI(-300) → Scene(-250) →
+Procedure(-200) → EntityWorld(-100) → 业务(0)
+
 ### V0.5 Gate 剩余项（待做）
-- [ ] NetworkModule（IChannel + IMessageBus 接口）
+- [ ] UGUI Adapter（UnityUIModule）— Plan agent 推荐 Iter 8
+- [ ] UnitySceneModule Adapter（接 SceneManager.LoadSceneAsync）
+- [ ] PlayerPrefs Save Adapter
+- [ ] NetworkModule（IChannel + IMessageBus 接口 + Memory）
 - [ ] Adapters/Mirror 默认实现
 - [ ] MemoryPack 序列化集成
-- [ ] HybridCLR IHotfixLoader 接口 + 实现
-- [ ] YooAsset Adapter（IResourceModule 落地真实加载）
-- [ ] UGUI Adapter（IUIModule 落地真实渲染）
-- [ ] Unity Audio Adapter（IAudioModule 接 AudioSource）
-- [ ] PlayerPrefs Save Adapter
+- [ ] HybridCLR IHotfixLoader
 
 ---
 

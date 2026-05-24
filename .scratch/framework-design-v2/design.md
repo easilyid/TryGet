@@ -349,7 +349,7 @@ public interface IHotfixLoader : IModule
 - Module Priority 完整链：Log(-1000) → Pool/Timer(-500) → Save(-450) → Localization(-420) → Resource(-400) → Audio(-380) → UI(-300) → Procedure(-200) → EntityWorld(-100) → 业务(0)
 - Plan agent 综合验收：五件套接口能支撑"启动→读存档→选语言→进 MainMenu→播 BGM→切场景"完整 UI 游戏闭环
 
-### V0.5 — Core 服务补齐 + InputModule + Network + Hot Reload（进行中）
+### V0.5 — Core 服务补齐 + Unity Adapter 落地（进行中）
 **Gate criteria：**
 
 Core 模块（已完成）：
@@ -361,17 +361,24 @@ Core 模块（已完成）：
 - [x] **SceneModule**：`ISceneModule` + `MemorySceneModule`（19 测试）。
   Core 只管"哪些场景已加载、哪个活动"，UnitySceneModule 留 Adapter。
 - [x] **SceneFlowDemoTests**：V0.5 三件套端到端 demo。
+- [x] **TimerModule 增强**：ScheduleRepeat + Pause/Resume（16 测试）。
+- [x] **AudioModule 增强**：Pause/Resume + PauseAll/ResumeAll（17 测试）。
 
-Adapter 优先级链（V0.4 推到 V0.5 的，仍待）：
-- [ ] **YooAsset Adapter**（`YooAssetResourceModule`）
-- [ ] **UGUI Adapter**（`UGUIUIModule`）
-- [ ] **Unity Audio Adapter**（`UnityAudioModule` 接 AudioSource）
-- [ ] **PlayerPrefs Save Adapter**（或 FileBased / sqlite-net）
-- [ ] **UnityInputModule Adapter**（接 InputSystem 包）
+Unity Adapter（已落地，PlayMode 测试基建）：
+- [x] **Tests/PlayMode test asmdef**（基建）：所有 Adapter PlayMode 测试的复用底座。
+- [x] **UnityAudioModule Adapter**（Iter 6）：基于 AudioSource 池 + RegisterClip API，
+  11 PlayMode 测试。
+- [x] **UnityInputModule Adapter**（Iter 7）：接 com.unity.inputsystem 1.18.0，
+  RegisterButton/RegisterAxis/RegisterAxis2D + binding 字符串注册，11 PlayMode 测试。
+
+Adapter 仍待（V0.5 Gate 剩余）：
+- [ ] **UGUI Adapter**（`UGUIUIModule`）— Plan agent 推荐 Iter 8，UI 分层 / 数据传参由 Adapter 扩展
 - [ ] **UnitySceneModule Adapter**（接 SceneManager.LoadSceneAsync）
+- [ ] **PlayerPrefs Save Adapter**（或 FileBased / sqlite-net）
+- [ ] **YooAsset Adapter**（YooAsset 包未装，物理阻塞，待用户安装）
 
 V0.5 原计划项（仍待）：
-- [ ] `IChannel` + `IMessageBus` 接口
+- [ ] `IChannel` + `IMessageBus` 接口（Plan agent 建议与首个真实 Adapter 共生设计，不先孤立做）
 - [ ] Adapters/Mirror 默认实现
 - [ ] MemoryPack 序列化集成
 - [ ] HybridCLR 集成走 IHotfixLoader
