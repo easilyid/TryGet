@@ -93,8 +93,9 @@ ServerProject/MyTryGetFramework.Core/
 | 0011 | ModuleHost + IModule 契约 | V0.2 落地 |
 | 0012 | Shadow csproj 双端编译 | V0.2 落地 + V0.5 持续验证 |
 | 0013 | 保留 Aspect 隔离纪律到 V2 | V0.2 重申 |
-| 0014 | Network/HotReload Adapter 抽象 | V0.6 计划（V0.5 推迟，Plan agent 建议与真实实现共生设计） |
-| 0015 | Adapter 契约偏离白名单（注册前置 / 诊断字段语义 / 运行环境前置） | V0.5 关门后 V0.6 落地 |
+| 0014 | Network/HotReload Adapter 抽象 | **Superseded by ADR-0016**（V1.1+ 真做时重写） |
+| 0015 | Adapter 契约偏离白名单 | **Superseded by ADR-0016** |
+| 0016 | **Adapter 层退出 Core 范围**（Audio/Input/UI/Scene 迁到 Samples/Unity/Adapters/） | V0.5.5 方向回切落地 |
 
 ## 依赖方向
 
@@ -138,10 +139,45 @@ host.Shutdown();               // 逆序
 - **PlayMode**（62 Unity Adapter 测试）：Test Runner → PlayMode
 - **跨端编译**：`cd ServerProject/MyTryGetFramework.Core && dotnet build`
 
-## V0.5 之后路线图（V0.6+）
+## V0.5 之后路线图（V0.6+）— 战略方向回切后重定义
 
-按 `.scratch/framework-design-v2/design.md` §12：
-- **V0.6 Iter 0**：文档 catch-up（本次完成）+ 跨 Adapter 综合 PlayMode demo
-- **V0.6 Iter 1+**：YooAsset Adapter（需先装 YooAsset 包，物理阻塞）
-- **V0.6 后期**：Network 接口 + Mirror Adapter 共生设计；MemoryPack 序列化；HybridCLR IHotfixLoader
-- **V1.0**：编辑器工具集 + 完整模板项目 + 文档 + CI / Unity batch 测试自动化
+> 2026/05/24 起依 `docs/strategy/V2-direction-pivot.md` 重定向。
+> 用户明确要求"商业框架基础架构"对标 ET/Fantasy/TEngine/Hsenl，
+> Unity Adapter/Network/热更归入业务扩展层。
+
+### V0.5.5（进行中）— Adapter 退场
+- Audio/Input/UI/Scene 整套（接口 + Memory + Adapter + 测试）迁到
+  `Samples/Unity/Adapters/`，保留代码价值作为业务参考样例
+- PlayerPrefsSaveModule Adapter 迁出，但 ISaveModule Core 接口保留（V0.8 重构为 IKeyValueStore）
+- 见 ADR-0016
+
+### V0.6 — ITask 异步原语（最致命缺口，自研 + 对标）
+- **目标**：Core 获得跨端 async 能力，参考 ETTask / Fantasy FTask / Hsenl Task
+  设计自研 ITask（用户决策：自研路线，不用 ValueTask 包装）
+- 文件：`Core/Async/ITask.cs`、`ITaskCompletionSource.cs`、`TaskPool.cs` 等
+- 先出 PRD `docs/design/V0.6-ITask.md`，对标 3 家 Task 实现的设计取舍
+
+### V0.7 — 双端入口规范 + ILogger + IClock
+- 对标 Fantasy `Platform.Unity.Entry` vs `Platform.Net.Entry`
+- `ILogModule` → `ILogger`；新增 `IClock`（解耦 Unity Time）
+- `Samples/Net/Program.cs`（dotnet console 启动）+ `Samples/Unity/TryGetMonoEntry.cs`
+
+### V0.8 — 配置 + 序列化重构
+- `IResourceModule` → `IAssetSource + ISerializer`
+- `ISaveModule` → `IKeyValueStore`
+- `IConfigModule` → `IConfigSource + ConfigLoader<T>`（类型化配置表）
+- `ILocalizationModule` → 评估降级到 `Optional/`
+
+### V0.9 — Source Generator 注册
+- 对标 Fantasy SourceGenerator + `[ModuleInitializer]` 自动注册
+- 消除手动 `host.Register<>()` 调用
+
+### V1.0 — 真双端样例 + 文档冻结
+- `Samples/Net/MmoServerDemo` + `Samples/Unity/MmoClientDemo` 共享 Aspect/Entity 代码
+- 对标 ET All-in-One 轻量版
+
+### V1.1+ — 业务扩展层（独立仓库或 Samples/）
+- Network 抽象（LiteNetLib/KCP/WebSocket）
+- HybridCLR Hotfix Loader
+- YooAsset Adapter
+- Luban 集成

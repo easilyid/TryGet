@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted
+**Superseded by ADR-0016** (2026/05/24)
+
+围绕 Unity Adapter 的 5 件套（Audio/Input/Save/UI/Scene）已整体退出 Core 范围，
+迁到 `Samples/Unity/Adapters/`（见 ADR-0016 + `docs/strategy/V2-direction-pivot.md`）。
+本 ADR 围绕的"Adapter 与 Memory 契约偏离"问题在新边界下不再是 Core 关注点。
+Samples 内部如果继续维护 Adapter，可在 Samples 内部 README 沿用本 ADR 思路。
+
+原 Accepted 内容保留以供历史参考：
 
 ## Context
 

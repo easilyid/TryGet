@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+**Superseded by ADR-0016** (2026/05/24)
+
+围绕 Adapter 层的设计已整体退出 Core 范围（见 ADR-0016 + `docs/strategy/V2-direction-pivot.md`）。
+Network / HotReload 在 V1.1+ 真做时重写本 ADR。
+
+原 Accepted 内容保留以供历史参考：
 
 ## Context
 
