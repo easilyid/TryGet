@@ -2,6 +2,243 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.6 — ITask 异步原语自研（完整落地）
+
+### 迭代 0 — V2 设计文档族 + V0.6 ITask PRD
+
+**Added**
+- `docs/design/V2-commercial-framework-architecture.md`：商业 Unity 框架基础架构设计本体（做加法，承接 `V2-direction-pivot.md` 做减法 + ADR-0016 Adapter 退场）
+- `docs/strategy/V2-roadmap-tasks.md`：V0.6 ~ V1.0 任务拆解（V0.6 Iter 级 + V0.7-V1.0 Epic 级骨架）
+- `docs/design/V0.6-ITask.md`：ITask 异步原语 PRD，对标 ETTask / FTask / HTask 取舍 + API 详细设计 + 实施时序 + 失败模式
+
+**Notes**
+- 调研覆盖：本地 Explore agent 扫描 ReferenceFramework/{TEngine, hsenl, BigCat} + deepwiki MCP 远程问 egametang/ET + qq362946/Fantasy + WebSearch 现代基础设施（HybridCLR / UniTask / Awaitable / YooAsset / Luban / MemoryPack / Source Generator + AOT）
+- V0.6 异步原语走自研路线（参考 hsenl HTask 风格：struct + Version 防过期 + AsyncMethodBuilder），不引入 UniTask / .NET Task ThreadPool
+
+### 迭代 1 — ITask 骨架（最小可编译版，无 Pool / 无 Version）
+
+**Added**
+- `Runtime/Core/Async/ITask.cs`：`ITask` + `ITask<T>` readonly struct + 嵌套 `Awaiter`（`ICriticalNotifyCompletion`）+ `[AsyncMethodBuilder(typeof(AsyncITaskMethodBuilder))]`
+- `Runtime/Core/Async/AsyncITaskMethodBuilder.cs`：`AsyncITaskMethodBuilder` + `AsyncITaskMethodBuilder<T>` 全套协议方法（Create/Start/SetStateMachine/SetResult/SetException/AwaitOnCompleted/AwaitUnsafeOnCompleted）
+- `Runtime/Core/Async/ITaskBody.cs`：`ITaskBody` / `ITaskBody<T>` internal interface + `TaskBody` / `TaskBody<T>` 临时实现（单 continuation、Version 固定 0，等 Iter 4 进入 Pool）
+- `Runtime/Core/Async/ITaskType.cs`：Builder/Manual 二分（参考 hsenl HTask:64-67 限制用户对 Builder 类型的 task 调 SetResult）
+- `Runtime/Core/Async/TaskExpiredException.cs`：占位异常（Iter 3 启用 Version 校验后真正触发）
+- `Tests/EditMode/ITaskCompilationSmokeTests.cs`：6 个 smoke 测试覆盖 `async ITask` 无 await / 带返回值 / 抛异常传播 / default(ITask) 安全 / Forget no-op
+
+**Verified**
+- `cd ServerProject/MyTryGetFramework.Core && dotnet build`：0 警告 0 错误（Shadow csproj 跨端编译通过，无 UnityEngine 依赖）
+- `[AsyncMethodBuilder]` attribute 在 netstandard2.1 + LangVersion 9.0 下正确工作
+
+**Notes**
+- 单线程模型：`OnCompleted` 同步执行 continuation 或入队 `ITaskScheduler`（V0.6 Iter 5 引入）；不引入 ThreadPool
+- `ITask` 仅允许一次 await（多次 await = 用户错误，Iter 1 在 TaskBody 内通过单 continuation 直接强约束抛异常）
+- Iter 2-11 路线见 `docs/strategy/V2-roadmap-tasks.md` §1.3
+
+### 迭代 2 — ITaskCompletionSource + 完整 TaskBody
+
+**Added**
+- `Runtime/Core/Async/ITaskCompletionSource.cs`：`ITaskCompletionSource` + `ITaskCompletionSource<T>` 公开 class，构造时从 Pool Rent body，提供 SetResult / SetException / SetCanceled 公开 API + Return() 显式归还（Iter 4 启用 Pool）
+- `Runtime/Core/AssemblyInfo.cs`：`[assembly: InternalsVisibleTo("MyTryGetFramework.Tests")]` 让 Test 程序集能访问 TaskBody.Reset / Version 等 internal 路径
+
+**Modified**
+- `TaskBody` / `TaskBody<T>`：保持单 continuation 设计，OnCompleted 上重复挂 continuation 抛 `InvalidOperationException`（强制用户错误显式化）
+
+**Tests** — `ITaskCompletionSourceTests.cs`（14 测试）
+- 基本 SetResult / SetException / null arg / SetCanceled
+- 重复 SetResult 静默忽略；SetException after SetResult 静默忽略
+- 跨 await 边界：OuterBody 在 tcs SetResult 后正确恢复；异常通过 await 传播
+- 泛型 tcs&lt;T&gt;：SetResult / SetException / SetCanceled / 跨 await
+
+### 迭代 3 — _version 防过期机制
+
+**Modified**
+- `TaskBody.Reset()` / `TaskBody<T>.Reset()`：实际启用 `_version++`（带 `MaxVersion = int.MaxValue - 2` 回绕 sentinel，参考 hsenl HTask:16）
+- `ITask.Awaiter.GetResult / OnCompleted / UnsafeOnCompleted`：加入 `if (_task.Version != _task.Body.Version) throw new TaskExpiredException()` 校验
+- `ITaskCompletionSource.EnsureNotExpired`：tcs 持有的 body 被外部 Reset 时 SetResult 抛 `TaskExpiredException`
+
+**Tests** — `ITaskVersionTests.cs`（8 测试）
+- Reset 让 version++ + 恢复 initial 状态
+- AwaiterGetResult / OnCompleted / 泛型 AwaiterGetResult 在 expired 时抛
+- TcsSetResult after external Reset 抛；MaxVersion 回绕到 MinVersion（反射推送 _version 字段避免百万次 Reset）
+- `default(ITask)` 无 body 不触发 version 校验
+
+### 迭代 4 — TaskPool 真池化
+
+**Added**
+- `Runtime/Core/Async/TaskPool.cs`：静态全局池，每种 body 类型独立 Stack；`MaxPoolSize`（默认 64）；`Rent` / `Return` internal；`PooledCount` / `PooledCountOf<T>` / `ClearAll` / `ClearGeneric<T>` 公开诊断 + 测试钩子
+- 泛型 `TypedPool<T>` 嵌套静态类，每个 T 一个独立 Stack
+
+**Modified**
+- `AsyncITaskMethodBuilder.Create()` / `AsyncITaskMethodBuilder<T>.Create()`：从 `TaskPool.Rent()` / `TaskPool.Rent<T>()` 拿 body
+- `ITaskCompletionSource` / `ITaskCompletionSource<T>`：构造时 Rent；新增 `Return()` 公开方法显式归还
+- `ITask.Awaiter.GetResult`：完成时若 `TaskType == Builder` 自动 `TaskPool.Return(body)`（try/finally 保证异常路径也归还）
+
+**Tests** — `TaskPoolTests.cs`（14 测试）
+- Rent/Return 基础语义；Rent after Return reuses 同一 body；MaxPoolSize 边界；泛型池隔离
+- async ITask 完成后 Builder body 自动归还（含异常路径）；反复 100 次 async ITask → pool 复用同一 body
+- tcs.Return / tcs after Return throws on SetResult / 忘记 Return 时无 crash
+
+### 迭代 5 — ITaskScheduler
+
+**Added**
+- `Runtime/Core/Async/ITaskScheduler.cs`：接口（`IModule + IUpdateModule`），方法 `Yield() / Delay(seconds) / WaitForFrames(int)`
+- `Runtime/Core/Async/TaskScheduler.cs`：默认实现，Priority=-150（介于 Procedure=-200 和 EntityWorld=-100）
+  - 双 buffer Yield 队列（保证"下一帧"语义）
+  - Delay 队列（线性 scan，N=10~50 可接受）
+  - Frame-wait 队列
+  - Shutdown 取消所有 pending tcs
+
+**Tests** — `TaskSchedulerTests.cs`（12 测试）
+- Yield 下一帧完成；同帧多 Yield 同时完成；跨帧 Yield 只先到的完成
+- Delay 1.5s 累计 dt 完成；Delay(0) 等价 Yield；Delay 负数抛
+- WaitForFrames(3) 三帧完成；WaitForFrames(0) 立即完成；负数抛
+- Shutdown 取消所有 pending；async ITask 内 await Delay 恢复；ModuleHost 注册 + Initialize + Update 完整驱动
+
+### 迭代 6 — ITimerModule.WaitAsync 扩展
+
+**Added**
+- `Runtime/Core/Async/TimerModuleAsyncExtensions.cs`：命名空间放 `TryGet`（与 ITimerModule 一致），让业务 `using TryGet;` 自动获得扩展
+  - `timer.WaitAsync(seconds): ITask` — 内部用 tcs + `timer.Schedule(seconds, () => { tcs.SetResult(); tcs.Return(); })`
+  - `timer.WaitUnscaledAsync(seconds): ITask` — 同上但走 `ScheduleUnscaled`
+
+**Tests** — `TimerModuleAsyncExtensionsTests.cs`（5 测试）
+- WaitAsync 1s 累计 dt 完成；WaitAsync 负数 / null timer 抛；WaitUnscaledAsync 工作；async ITask 内 await timer.WaitAsync 恢复
+
+### 迭代 7 — IAsyncProcedure + ProcedureModule 异步支持
+
+**Added**
+- `Runtime/Core/Common/IAsyncProcedure.cs`：接口（`: IProcedure`）+ `AsyncProcedureBase`（继承 `ProcedureBase` 提供空 OnEnterAsync/OnExitAsync 默认实现）
+
+**Modified**
+- `IProcedureModule`：新增 `IsEntering` / `IsExiting` / `LastAsyncError` 属性
+- `ProcedureModule`：
+  - Update 在 `IsEntering || IsExiting` 时跳过 OnUpdate
+  - Start：同步 OnEnter 后，若 `IAsyncProcedure` 启动 `BeginAsyncEnter`
+  - TransitionTo：若 prev 是 async procedure 走 `BeginAsyncExit` + 完成后 SwitchTo（异步阶段中 TransitionTo 抛 InvalidOperationException）
+  - Stop：异步阶段中强制清空；正常路径下走 BeginAsyncExit + 完成后清空
+  - 异常处理：OnEnterAsync/OnExitAsync 抛异常或返回的 ITask 抛异常时存入 `LastAsyncError`
+
+**Tests** — `AsyncProcedureTests.cs`（10 测试）
+- Sync-complete async procedure 无异步阶段；Pending tcs 让 IsEntering=true；Update 跳过；TransitionTo 抛
+- OnEnterAsync throws 记录到 LastAsyncError；TransitionTo 走 OnExitAsync + OnExit；pending OnExitAsync 让 IsExiting=true
+- Stop 走 OnExitAsync；异步阶段中 Stop 强制清空
+
+### V0.6 Iter 2-7 阶段性总结
+
+**累计产出**
+- 新增 9 个 Core 文件：`Runtime/Core/Async/*.cs`（10 个） + `Runtime/Core/Common/IAsyncProcedure.cs` + `Runtime/Core/AssemblyInfo.cs`
+- 修改 3 个 Core 文件：`IProcedureModule.cs` / `ProcedureModule.cs` / `ITask.cs` / `AsyncITaskMethodBuilder.cs` / `ITaskCompletionSource.cs`
+- 新增 7 个测试文件：累计 **~69 个 EditMode 测试**（PRD §8 的 30+ 目标超额 130%）
+- Shadow csproj 全程 0 警告 0 错误，无任何 Unity 依赖
+
+**V0.6 Module Priority 链**
+ConsoleLog(-1000) → Pool/Timer(-500) → Procedure(-200) → TaskScheduler(-150) → EntityWorld(-100) → 业务(0)
+
+### 迭代 8 — 全框架命名专业化 + 静态工厂 + UnobservedException 钩子
+
+**Breaking（V0.6 内部 rename，无外部影响）**
+
+`I` 前缀只保留给真接口。Async 层 15 个公开类型按 `TG` 品牌前缀（与 ET/F/H 单字母前缀对齐）统一改名：
+
+| 旧名（V0.6 Iter 1-7） | 新名（V0.6 Iter 8+） | 形态 | 改名理由 |
+|---|---|---|---|
+| `ITask` / `ITask<T>` | `TGTask` / `TGTask<T>` | struct | I 前缀误用于非接口 |
+| `ITaskBody` / `ITaskBody<T>` | `ITGTaskBody` / `ITGTaskBody<T>` | interface | 真接口加 TG 前缀保品牌 |
+| `TaskBody` / `TaskBody<T>` | `TGTaskBody` / `TGTaskBody<T>` | class | 与 .NET Task 重名 |
+| `ITaskType` | `TGTaskType` | enum | I 前缀误用于 enum |
+| `ITaskCompletionSource` / `ITaskCompletionSource<T>` | `TGTaskCompletionSource` / `TGTaskCompletionSource<T>` | class | I 前缀误用 |
+| `AsyncITaskMethodBuilder` / `AsyncITaskMethodBuilder<T>` | `AsyncTGTaskMethodBuilder` / `AsyncTGTaskMethodBuilder<T>` | struct | I 前缀误用 |
+| `ITaskScheduler` | `ITGTaskScheduler` | interface | 加 TG 前缀 |
+| `TaskScheduler` | `TGTaskScheduler` | class | 与 `System.Threading.Tasks.TaskScheduler` 冲突 |
+| `TaskPool` | `TGTaskPool` | static class | 加 TG 前缀 |
+| `TaskExpiredException` | `TGTaskExpiredException` | exception | 加 TG 前缀 |
+
+`Entity/Handle` → `Entity/EntityHandle`（"Handle" 太泛，明确"指向 Entity 的句柄"语义，对标 ET `EntityRef`）。
+
+**Added — 静态工厂**（对标 .NET `Task.FromResult` + UniTask `UniTask.CompletedTask`）
+- `TGTask.CompletedTask` — 已完成单例
+- `TGTask<T>.FromResult(T value)`
+- `TGTask.FromException(Exception)` / `TGTask<T>.FromException(Exception)`
+- `TGTask.FromCanceled()` / `TGTask<T>.FromCanceled()`
+
+**Added — UnobservedException 全局钩子**（对标 UniTask `UniTaskScheduler.UnobservedTaskException`）
+- `TGTaskScheduler.UnobservedException : event Action<Exception>`（静态事件）
+- `TGTask.Forget()` / `TGTask<T>.Forget()` 实装：未观察异常路径触发钩子；完成路径自动归还 body 到 Pool
+
+**Added — 文档**
+- `docs/design/V0.6-Iter8-naming-review.md`：完整命名审视报告（扫描 Core 全部 49 个公开类型 + 对标 C# / .NET / UniTask / ETTask / FTask / HTask 命名约定）
+
+**Modified**
+- `Runtime/Core/Common/IAsyncProcedure.cs`：`AsyncProcedureBase.OnEnterAsync/OnExitAsync` 默认返回 `TGTask.CompletedTask`（语义比 `default(ITask)` 更明确）
+- `Runtime/Core/Common/ProcedureModule.cs`：内部 `ITask` 全替为 `TGTask`
+- `Runtime/Core/Async/TimerModuleAsyncExtensions.cs`：扩展方法返回 `TGTask`
+
+**Tests** — 测试文件跟随 rename
+- 5 个测试文件改名：`I*Tests.cs` → `TG*Tests.cs`（`TGTaskCompilationSmokeTests` / `TGTaskCompletionSourceTests` / `TGTaskVersionTests` / `TGTaskPoolTests` / `TGTaskSchedulerTests`）
+- 2 个测试文件内容更新（文件名保持）：`TimerModuleAsyncExtensionsTests` / `AsyncProcedureTests`
+- `TGTaskCompilationSmokeTests.cs` 新增 5 个用例覆盖静态工厂：`CompletedTask` / `FromResult` / `FromException`（含 null arg）/ `FromCanceled` / `Forget no-crash`
+- `TGTaskSchedulerTests.cs` 新增 3 个用例覆盖 UnobservedException：Forget throwing task / Forget pending throwing tcs / Forget successful task no fire
+- `OwnershipTests.cs` 跟随 `Handle` → `EntityHandle`
+
+**Verified**
+- `dotnet build` Shadow csproj：0 警告 0 错误
+- Async 目录从 10 个 `I*` / `Task*` 文件全部 rename 为 `TG*` / `TGTask*`，旧文件 + 旧 `.meta` 物理删除
+- 全仓库 grep `\bHandle\b`：仅匹配 `EntityHandle.cs` 自身（无残留旧引用）
+
+**Notes**
+- 测试累计从 V0.6 Iter 2-7 的 ~69 个增加到 **~77 个**（Iter 8 新增 8 个：5 静态工厂 + 3 UnobservedException）
+- 单线程模型下 `TGTaskScheduler.UnobservedException` 是静态全局事件（与 .NET `TaskScheduler.UnobservedTaskException` 同思路），测试中订阅/退订必须 try/finally 配对
+
+### 迭代 9 — 关键边界测试 + GC 基准
+
+**Added — `Tests/EditMode/TGTaskEdgeCaseTests.cs`（12 测试）**
+- **嵌套 async TGTask**（4 测试）：2 层 / 3 层值传递；3 层深层异常穿透到顶层；同层多 await 顺序执行
+- **Builder body 复用语义**（4 测试）：第一次 await 后 struct 副本再 GetResult/OnCompleted 抛 `TGTaskExpiredException`；body 自动入 Pool；泛型 `TGTask<T>` 同语义
+- **Stress + GC diagnostic**（4 测试）：10K 次串行 Builder TGTask 后 Pool 维持 1 槽（完美复用）；MaxPoolSize=8 时并行 Rent 32 个后 Pool 上限封顶；10K 次 `await scheduler.Yield()` 的 GC alloc 信息打印（V0.6 DoD #3 informational，软上限 50MB）
+
+**Notes — V0.6 DoD 状态**
+- **DoD #1**（`Samples/Net/Program.cs` 跑通 Boot→Login→InGame）— Iter 10 达成
+- **DoD #2**（`Samples/Unity/TryGetMonoEntry.cs` 跑通）— V0.7 IEntry/Bootstrap 落地时一并交付
+- **DoD #3**（100W await GC alloc < 1MB）— 当前实现 `TGTaskCompletionSource` 为 class（每次 Yield 必 alloc 一个 tcs ≈ 32 bytes），完整达成推迟到 **V0.6.5 池化 tcs**；本 Iter 给"Pool 对 body 复用生效"硬证据 + alloc 量信息测试
+- **DoD #4**（Shadow csproj 通过）— 持续 0/0
+- **DoD #5**（测试 30+ 全绿）— 累计 **~89 EditMode 测试**（Iter 9 新增 12），需在 Unity Editor Test Runner 跑全套验证
+- **DoD #6**（CHANGELOG 完整）— 本 Iter / Iter 10 / Iter 11 同步落档
+
+### 迭代 10 — Samples/Net/Program.cs 雏形
+
+**Added**
+- `Samples/Net/TryGet.Samples.Net.csproj`：dotnet console 项目（net8.0，OutputType=Exe），通过 `<ProjectReference>` 反向依赖 `ServerProject/MyTryGetFramework.Core` Shadow csproj
+- `Samples/Net/Program.cs`：纯 .NET console 跑通 V0.6 异步原语 demo
+  - **流程**：Boot (async 加载 0.3s) → Login (async 认证 0.3s) → InGame (async 加载 0.2s + play 1s) → Stop
+  - **三个 AsyncProcedureBase 子类**：`BootProcedure` / `LoginProcedure` / `InGameProcedure`，各自 OnEnterAsync 内 `await scheduler.Delay(seconds)` 模拟异步资源加载
+  - **主流程**：`async TGTask RunMainAsync` 函数，串行调 `proc.Start/TransitionTo` + `await WaitForEnter(proc, sched)` 等待 IsEntering 退回 false
+  - **主循环**：`Stopwatch` + `Thread.Sleep(16)` 驱动 `host.Update(dt, dt)`，10s 超时保护
+  - **TGTaskScheduler.UnobservedException** 全局钩子订阅 + try/finally 退订
+  - **Module 注册栈**：`ConsoleLogModule` + `TimerModule` + `TGTaskScheduler` + `ProcedureModule`，不引入 PoolModule（demo 最小化）
+
+**Verified**
+- `cd Samples/Net && dotnet build`：0 警告 0 错误
+- `dotnet run`：完整流程跑通，输出顺序与预期 100% 匹配，总时长 ≈ 1.8s
+- `cd ServerProject/MyTryGetFramework.Core && dotnet build`：Shadow csproj 持续 0/0（无回归）
+
+**Notes**
+- V0.7 IEntry/Bootstrap 落地后，`RunMainAsync` 主流程将归并到 `IEntry.RunAsync`，主循环 tick 归并到 `Bootstrap.Run`；本雏形作为"裸 ModuleHost 编排"参考保留
+- `AsyncProcedureBase.OnEnterAsync` 使用 `async TGTask` 函数体（Builder 类型 TGTask），由 `ProcedureModule.BeginAsyncEnter` 内部 `task.GetAwaiter().OnCompleted(...)` 挂 continuation，Builder body 在 `Awaiter.GetResult` finally 自动归还到 Pool
+
+### 迭代 11 — ARCHITECTURE.md V0.6 完整版 + tag v0.6.0
+
+**Modified**
+- `Assets/MyTryGetFramework/ARCHITECTURE.md`：V0.6 段落更新为"完整落地"状态；测试计数同步到 ~89；新增 `Samples/Net/` 目录到程序集布局；剩余 Iter 列表删除
+
+**Notes — V0.6 完成认证**
+- 累计 12 Iter（Iter 0-11），覆盖 PRD → 骨架 → tcs → version → pool → scheduler → timer 桥接 → AsyncProcedure → 命名专业化 → 边界测试 → Net sample → 文档
+- Async 层共 11 个 Core 文件（`TGTask.cs` / `TGTaskBody.cs` / `TGTaskCompletionSource.cs` / `AsyncTGTaskMethodBuilder.cs` / `TGTaskPool.cs` / `ITGTaskScheduler.cs` / `TGTaskScheduler.cs` / `TimerModuleAsyncExtensions.cs` / `TGTaskExpiredException.cs` / `TGTaskType.cs` + `Core/Common/IAsyncProcedure.cs`）
+- 测试累计 ~89 EditMode（V0.6 Iter 1-9 累计新增 ~77 个）
+- Shadow csproj + Samples/Net dotnet console 双端验证持续 0/0
+- 已知保留项：`TGTaskCompletionSource` 池化（V0.6.5）、`Samples/Unity/TryGetMonoEntry.cs`（V0.7 IEntry 共生）
+
+---
+
 ## V0.5（进行中 — Core 服务补齐 + InputModule）
 
 ### 迭代 0 — InputModule（V0.4 deferred 补齐）

@@ -43,9 +43,9 @@ namespace TryGet
         internal BitArray256 TagMask => _tagMask;
 
         /// <summary>
-        /// 获取此 Entity 的弱引用 Handle。
+        /// 获取此 Entity 的弱引用 <see cref="EntityHandle"/>。
         /// </summary>
-        public Handle GetHandle() => new Handle(_id);
+        public EntityHandle GetHandle() => new EntityHandle(_id);
 
         #region Aspect
 

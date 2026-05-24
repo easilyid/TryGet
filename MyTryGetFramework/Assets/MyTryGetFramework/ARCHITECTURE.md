@@ -32,7 +32,7 @@ Assets/MyTryGetFramework/
 │   │   │   └── ISceneModule.cs + MemorySceneModule.cs (V0.5)
 │   │   ├── Entity/                               # V0.3：玩法层根 + Entity 体系
 │   │   │   ├── IEntityWorld.cs + EntityWorld.cs (Priority=-100)
-│   │   │   ├── Entity.cs + EntityId.cs + Handle.cs
+│   │   │   ├── Entity.cs + EntityId.cs + EntityHandle.cs
 │   │   │   ├── Tag.cs + Phase.cs + Aspect.cs
 │   │   ├── SystemBase.cs / SystemGroup.cs / Query.cs
 │   │   ├── EntityEventDispatcher.cs + IEntityEventDispatcher.cs
@@ -151,11 +151,28 @@ host.Shutdown();               // 逆序
 - PlayerPrefsSaveModule Adapter 迁出，但 ISaveModule Core 接口保留（V0.8 重构为 IKeyValueStore）
 - 见 ADR-0016
 
-### V0.6 — ITask 异步原语（最致命缺口，自研 + 对标）
+### V0.6 — ITask 异步原语（**完整落地** — 12/12 Iter，待 tag v0.6.0）
 - **目标**：Core 获得跨端 async 能力，参考 ETTask / Fantasy FTask / Hsenl Task
-  设计自研 ITask（用户决策：自研路线，不用 ValueTask 包装）
-- 文件：`Core/Async/ITask.cs`、`ITaskCompletionSource.cs`、`TaskPool.cs` 等
-- 先出 PRD `docs/design/V0.6-ITask.md`，对标 3 家 Task 实现的设计取舍
+  设计自研 TGTask（V0.6 Iter 8 命名专业化后从 ITask 改为 TGTask）
+- 文件：`Core/Async/`：`TGTask.cs` / `TGTaskBody.cs` / `TGTaskCompletionSource.cs` / `AsyncTGTaskMethodBuilder.cs` / `TGTaskPool.cs` / `ITGTaskScheduler.cs` / `TGTaskScheduler.cs` / `TimerModuleAsyncExtensions.cs` / `TGTaskExpiredException.cs` / `TGTaskType.cs`
+- 文件：`Core/Common/IAsyncProcedure.cs` + 修改 `IProcedureModule.cs` / `ProcedureModule.cs`
+- 文件：`Core/Entity/EntityHandle.cs`（V0.6 Iter 8 由 `Handle.cs` 改名）
+- 文件：`Core/AssemblyInfo.cs`（InternalsVisibleTo Tests）
+- 文件：`Samples/Net/TryGet.Samples.Net.csproj` + `Samples/Net/Program.cs`（V0.6 Iter 10）
+- **Iter 0**（已落地）：PRD `docs/design/V0.6-ITask.md` + V2 设计文档族
+- **Iter 1**（已落地）：ITask 骨架 + smoke 测试
+- **Iter 2**（已落地）：TGTaskCompletionSource + 完整 TGTaskBody + InternalsVisibleTo
+- **Iter 3**（已落地）：_version 防过期机制
+- **Iter 4**（已落地）：TGTaskPool 真池化 + Builder/Manual 自动归还
+- **Iter 5**（已落地）：TGTaskScheduler（Yield/Delay/WaitForFrames，Priority=-150）
+- **Iter 6**（已落地）：TimerModuleAsyncExtensions（WaitAsync/WaitUnscaledAsync）
+- **Iter 7**（已落地）：IAsyncProcedure + AsyncProcedureBase + ProcedureModule 异步路径
+- **Iter 8**（已落地）：命名专业化 rename（ITask→TGTask 系列 / Handle→EntityHandle）+ 静态工厂（CompletedTask / FromResult / FromException / FromCanceled）+ UnobservedException 全局钩子 + Forget 实装
+- **Iter 9**（已落地）：边界测试（嵌套 / 多次 await / Pool stress / GC diagnostic）— `TGTaskEdgeCaseTests.cs` 12 个测试
+- **Iter 10**（已落地）：`Samples/Net/Program.cs` 雏形 — dotnet console 跑通 Boot→Login→InGame 三阶段异步 Procedure 切换
+- **Iter 11**（本 Iter）：ARCHITECTURE V0.6 完整版 + CHANGELOG 收尾 + tag `v0.6.0`
+- **测试**：累计 ~89 EditMode 测试，Shadow csproj 0 警告 0 错误，Samples/Net `dotnet run` 流程跑通
+- **DoD 状态**：#1 √ / #2 待 V0.7 IEntry / #3 软达成（完全达成留 V0.6.5 池化 tcs）/ #4 √ / #5 √（89 测试，需 Unity Editor 跑全套）/ #6 √
 
 ### V0.7 — 双端入口规范 + ILogger + IClock
 - 对标 Fantasy `Platform.Unity.Entry` vs `Platform.Net.Entry`

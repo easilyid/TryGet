@@ -51,5 +51,23 @@ namespace TryGet
         /// 允许重复调用（未运行时静默 return）。
         /// </summary>
         void Stop();
+
+        /// <summary>
+        /// V0.6 Iter 7：当前是否处于 IAsyncProcedure 的 OnEnterAsync 异步阶段。
+        /// true 时 OnUpdate 不调度，TransitionTo / Stop 调用抛 InvalidOperationException。
+        /// </summary>
+        bool IsEntering { get; }
+
+        /// <summary>
+        /// V0.6 Iter 7：当前是否处于 IAsyncProcedure 的 OnExitAsync 异步阶段。
+        /// 语义同 <see cref="IsEntering"/>。
+        /// </summary>
+        bool IsExiting { get; }
+
+        /// <summary>
+        /// V0.6 Iter 7：最近一次 OnEnterAsync / OnExitAsync 的异常（成功时为 null）。
+        /// 业务可在 TransitionTo 后查询，或绕过状态机自行重试。
+        /// </summary>
+        System.Exception LastAsyncError { get; }
     }
 }

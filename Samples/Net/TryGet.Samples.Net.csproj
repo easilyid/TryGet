@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    V0.6 Iter 10 — Samples/Net 雏形（dotnet console 跑通 V0.6 异步原语 Demo）。
+
+    用途：证明 MyTryGetFramework.Core 在纯 .NET 环境下也能跑出 async TGTask 流程
+    （Boot → Login → InGame 三阶段 Procedure 切换），不依赖 UnityEngine。
+
+    依赖路径：通过 ProjectReference 引用 Shadow csproj（反向编译 Core 源码）。
+    V0.7 IEntry/Bootstrap 落地后，此样例将被规范化为"IEntry 实现示例"。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>TryGet.Samples.Net</RootNamespace>
+    <AssemblyName>TryGet.Samples.Net</AssemblyName>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ServerProject\MyTryGetFramework.Core\MyTryGetFramework.Core.csproj" />
+  </ItemGroup>
+
+</Project>

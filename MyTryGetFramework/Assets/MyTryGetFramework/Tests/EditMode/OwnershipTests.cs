@@ -156,7 +156,7 @@ namespace TryGet.Tests
         {
             var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
-            Handle handle = entity.GetHandle();
+            EntityHandle handle = entity.GetHandle();
 
             Entity resolved = handle.Resolve(world);
             Assert.AreEqual(entity, resolved);
@@ -169,7 +169,7 @@ namespace TryGet.Tests
         {
             var world = new EntityWorld("Test");
             Entity entity = world.CreateEntity();
-            Handle handle = entity.GetHandle();
+            EntityHandle handle = entity.GetHandle();
 
             world.DestroyEntity(entity);
             Entity resolved = handle.Resolve(world);

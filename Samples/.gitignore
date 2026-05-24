@@ -1,0 +1,14 @@
+# Build artifacts (Visual Studio / dotnet CLI)
+bin/
+obj/
+*.user
+*.suo
+
+# Rider / IDE caches
+.idea/
+.vs/
+
+# Override repo-root *.csproj ignore: Samples/ csproj files are hand-written and must be checked in
+!*.csproj
+!**/*.csproj
+!*.sln

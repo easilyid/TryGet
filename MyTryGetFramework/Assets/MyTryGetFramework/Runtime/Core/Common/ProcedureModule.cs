@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using TryGet.Async;
 
 namespace TryGet
 {
     /// <summary>
     /// IProcedureModule 默认实现。基于 string 状态键的跨帧状态机。
+    /// V0.6 Iter 7 起支持 <see cref="IAsyncProcedure"/> 异步路径。
     /// </summary>
     public sealed class ProcedureModule : IProcedureModule
     {
@@ -14,14 +16,21 @@ namespace TryGet
         private IModuleHost _host;
         private bool _isTransitioning;
 
-        // 介于 EntityWorld (-100) 与业务 Module (0) 之间：
-        // Procedure 在 World 启动后驱动游戏流程，但业务 Module 可依赖 IProcedureModule 拉取当前状态。
+        // V0.6 Iter 7：异步生命周期状态
+        private bool _isEntering;
+        private bool _isExiting;
+        private Exception _lastAsyncError;
+
         public int Priority => -200;
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
 
         public string CurrentState => _currentId;
         public bool IsRunning => _current != null;
         public IModuleHost Host => _host;
+
+        public bool IsEntering => _isEntering;
+        public bool IsExiting => _isExiting;
+        public Exception LastAsyncError => _lastAsyncError;
 
         public void OnInit(IModuleHost host) { _host = host; }
 
@@ -30,16 +39,20 @@ namespace TryGet
             if (_current != null)
             {
                 try { _current.OnExit(this); }
-                catch { /* Shutdown 路径吞异常，让其他 Module Shutdown 继续走 */ }
+                catch { /* Shutdown 路径吞异常 */ }
             }
             _current = null;
             _currentId = null;
             _procedures.Clear();
             _host = null;
+            _isEntering = false;
+            _isExiting = false;
+            _lastAsyncError = null;
         }
 
         public void Update(float deltaTime, float unscaledDeltaTime)
         {
+            if (_isEntering || _isExiting) return;
             _current?.OnUpdate(this, deltaTime, unscaledDeltaTime);
         }
 
@@ -67,13 +80,22 @@ namespace TryGet
 
             _current = procedure;
             _currentId = initial;
+            _lastAsyncError = null;
             _current.OnEnter(this);
+
+            if (_current is IAsyncProcedure asyncProc)
+            {
+                BeginAsyncEnter(asyncProc);
+            }
         }
 
         public void TransitionTo(string target)
         {
             if (_current == null)
                 throw new InvalidOperationException("ProcedureModule not started. Call Start first.");
+            if (_isEntering || _isExiting)
+                throw new InvalidOperationException(
+                    "Cannot TransitionTo while current procedure is in async Enter/Exit. Wait until async phase completes.");
             if (string.IsNullOrEmpty(target))
                 throw new ArgumentException("Target procedure id must be non-empty.", nameof(target));
             if (!_procedures.TryGetValue(target, out var next))
@@ -86,20 +108,19 @@ namespace TryGet
             _isTransitioning = true;
             try
             {
-                // 同状态切换允许（Exit → Enter 重启语义）
                 var prev = _current;
-                try
+                _lastAsyncError = null;
+
+                if (prev is IAsyncProcedure asyncPrev)
                 {
-                    prev.OnExit(this);
+                    BeginAsyncExit(asyncPrev, () => SwitchTo(next, target));
                 }
-                catch
+                else
                 {
-                    // OnExit 抛出：保留 prev 为 current，状态机不切换。让调用方决定如何修复。
-                    throw;
+                    try { prev.OnExit(this); }
+                    catch { throw; }
+                    SwitchTo(next, target);
                 }
-                _current = next;
-                _currentId = target;
-                _current.OnEnter(this);
             }
             finally
             {
@@ -112,11 +133,116 @@ namespace TryGet
             if (_current == null)
                 return;
 
-            // 与 Shutdown 对称：吞 OnExit 异常，避免半停状态（让"停"始终成功）
+            if (_current is IAsyncProcedure asyncProc)
+            {
+                if (_isEntering || _isExiting)
+                {
+                    try { _current.OnExit(this); }
+                    catch { }
+                    _current = null;
+                    _currentId = null;
+                    _isEntering = false;
+                    _isExiting = false;
+                    return;
+                }
+
+                BeginAsyncExit(asyncProc, () =>
+                {
+                    _current = null;
+                    _currentId = null;
+                });
+                return;
+            }
+
             try { _current.OnExit(this); }
-            catch { /* swallow，保持与 Shutdown 一致 */ }
+            catch { }
             _current = null;
             _currentId = null;
+        }
+
+        // ----------------- V0.6 Iter 7 async helpers -----------------
+
+        private void BeginAsyncEnter(IAsyncProcedure asyncProc)
+        {
+            _isEntering = true;
+            TGTask task;
+            try
+            {
+                task = asyncProc.OnEnterAsync(this);
+            }
+            catch (Exception ex)
+            {
+                _lastAsyncError = ex;
+                _isEntering = false;
+                return;
+            }
+
+            if (task.IsCompleted)
+            {
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                _isEntering = false;
+                return;
+            }
+
+            task.GetAwaiter().OnCompleted(() =>
+            {
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                _isEntering = false;
+            });
+        }
+
+        private void BeginAsyncExit(IAsyncProcedure asyncProc, Action afterExit)
+        {
+            _isExiting = true;
+            TGTask task;
+            try
+            {
+                task = asyncProc.OnExitAsync(this);
+            }
+            catch (Exception ex)
+            {
+                _lastAsyncError = ex;
+                _isExiting = false;
+                try { asyncProc.OnExit(this); }
+                catch (Exception innerEx) { _lastAsyncError = innerEx; }
+                afterExit?.Invoke();
+                return;
+            }
+
+            if (task.IsCompleted)
+            {
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                try { asyncProc.OnExit(this); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                _isExiting = false;
+                afterExit?.Invoke();
+                return;
+            }
+
+            task.GetAwaiter().OnCompleted(() =>
+            {
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                try { asyncProc.OnExit(this); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                _isExiting = false;
+                afterExit?.Invoke();
+            });
+        }
+
+        private void SwitchTo(IProcedure next, string targetId)
+        {
+            _current = next;
+            _currentId = targetId;
+            _current.OnEnter(this);
+
+            if (_current is IAsyncProcedure asyncNext)
+            {
+                BeginAsyncEnter(asyncNext);
+            }
         }
     }
 }
