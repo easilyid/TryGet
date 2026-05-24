@@ -94,6 +94,7 @@ ServerProject/MyTryGetFramework.Core/
 | 0012 | Shadow csproj 双端编译 | V0.2 落地 + V0.5 持续验证 |
 | 0013 | 保留 Aspect 隔离纪律到 V2 | V0.2 重申 |
 | 0014 | Network/HotReload Adapter 抽象 | V0.6 计划（V0.5 推迟，Plan agent 建议与真实实现共生设计） |
+| 0015 | Adapter 契约偏离白名单（注册前置 / 诊断字段语义 / 运行环境前置） | V0.5 关门后 V0.6 落地 |
 
 ## 依赖方向
 
