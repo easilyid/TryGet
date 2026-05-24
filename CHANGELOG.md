@@ -2,6 +2,101 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V1.0 — 双端架构契约 + 网络抽象层 + Shared 代码边界
+
+> 2026/05/24 用户指令"业务逻辑先轻放"重定向：原 V1.0 = MMO Server/Client Demo（业务重）改为"框架架构契约 + 网络抽象 + Shared 边界规范"，MMO demo 转 V1.1+ Adapter Demo minor。本 minor 仅契约不实现，KCP/LiteNetLib/TCP 实现全部留 V1.1+ Adapter。
+
+### 迭代 0 — V1.0 PRD（路线重定向）
+
+**Added**
+- `docs/design/V1.0-architecture-contracts.md`：4 框架对标（hsenl Channel/Service + ET Service/Session + Fantasy NetworkProtocolType + BigCat 三端 csproj） + INetClient/Server/Connection/Message + 5 IPlugPoint 详细 API + Samples/Shared 物理结构 + ITickLoop/IFrameLoop + Unity Entry 模板 + 5 Iter 拆分 + 与原 MMO demo 路线图差异表
+
+**关键决策**
+- V1.0 转向"架构契约"：原 V2 doc §6.5 V1.0 = MMO demo，2026/05/24 用户指令"业务逻辑先轻放"重定向到"双端架构契约 + 网络抽象 + Shared 边界规范"，MMO demo 推迟 V1.2 Demo minor
+- Core 只持网络契约（接口 + marker + IPlugPoint），不含具体协议实现（详见 ADR-0019）
+- 复用 V0.9 IPlugin/IPluginHost/IPlugPoint 机制承载网络生命周期事件（5 件 IPlugPoint：IOnConnectionStarted / Closed / RawDataReceived / MessageReceived / NetError）
+
+### 迭代 1 — Samples/Shared csproj 物理结构 + ADR-0018
+
+**Added**
+- `Samples/Shared/TryGet.Shared.csproj`：netstandard2.1，ProjectReference Core，承载跨端业务代码
+- `Samples/Shared/SharedInfo.cs`：placeholder marker（V1.0 期间业务侧暂不填充）
+- `docs/adr/0018-shared-code-boundary.md`：Samples/Shared 跨端共享代码边界规范
+
+**Notes**
+- Shared 允许：业务 Aspect / 业务 Module 接口 / 网络消息 struct / 业务 Event struct / 业务工具类 / [Module]/[SystemRegister]/[EventHandler] 标记
+- Shared 禁止：UnityEngine 引用 / Net 专属 API / KCP/LiteNetLib 等协议库 / 序列化库真依赖 / Editor-only API
+- Unity 端接入方式：V1.0 选**源引用**（asmdef + 物理路径），不用 Plugin DLL（避免调试 step-into 体验差，ET 已踩坑）
+
+### 迭代 2 — 网络抽象层契约（Runtime/Core/Net/）
+
+**Added**
+- `Runtime/Core/Net/INetClient.cs`：客户端连接（ConnectAsync / DisconnectAsync / Send / 3 events）+ IConnection（服务端单连接，Id / State / Send / CloseAsync）
+- `Runtime/Core/Net/INetServer.cs`：服务端监听（StartAsync / StopAsync / Connections / 4 events）
+- `Runtime/Core/Net/INetMessage.cs`：网络消息基础 marker 接口
+- `Runtime/Core/Net/ConnectionId.cs`：readonly struct + IEquatable + ConnectionState enum（5 状态）
+- `Runtime/Core/Net/NetPlugPoints.cs`：5 IPlugPoint 派生接口（IOnConnectionStarted / Closed / RawDataReceived / MessageReceived / NetError）
+
+**Notes**
+- 全部仅契约，Core 无任何具体协议实现（KCP / LiteNetLib / TCP / WebSocket 全部留 V1.1+ Adapter）
+- ConnectAsync / DisconnectAsync / StartAsync / StopAsync 返回 V0.6 TGTask（与异步原语集成）
+- IPlugPoint 5 件复用 V0.9 IPlugin/IPluginHost 机制：业务 `host.AddPlugin<IOnConnectionStarted, MyMonitorPlugin>(...)` 即注入网络中间件，零侵入
+- 简化 vs hsenl：不暴露 buffer-level event 到 Core 契约（业务多数场景不需要）；不引入 Service 中间层（INetServer 直接管 IConnection 集合）
+
+### 迭代 3 — ITickLoop / IFrameLoop 双端时间抽象
+
+**Added**
+- `Runtime/Core/Time/ITickLoop.cs`：ITickLoop（服务端 fixed-tick，TickInterval 常量步长）+ IFrameLoop（客户端可变-帧）
+
+**Notes**
+- 与 IClock / IUpdateModule 概念分工：
+  * IClock = 时间查询门面（DeltaTime / FrameCount）— "几点了？"
+  * IUpdateModule = 业务每帧回调（dt 上帧实际耗时）— "客户端可变帧"
+  * ITickLoop = 业务每 tick 回调（dt 固定 TickInterval）— "服务端定步长"
+  * IFrameLoop = 更轻量的客户端帧回调（不经 ModuleHost）
+- Core 不提供 driver 实现；服务端 demo 通常用 `while (true)` + `TGTaskScheduler.Delay(TickInterval)` 自构
+
+### 迭代 4 — 双端 Entry 模板标准化
+
+**Added**
+- `Assets/MyTryGetFramework/Samples/Unity/Entry/TryGetMonoEntry.cs`：MonoBehaviour 抽象 base，业务子类 override Setup(IModuleHost) 即用
+- `Assets/MyTryGetFramework/Samples/Unity/Entry/MyTryGetFramework.Samples.UnityEntry.asmdef`：Unity 端独立 asmdef，references = [MyTryGetFramework.Core]
+
+**Notes**
+- TryGetMonoEntry 桥接 MonoBehaviour 生命周期到 ModuleHost：
+  * Awake → Bootstrap.CreateHost(Options) → Setup(host) → host.Initialize
+  * Update → host.Update
+  * LateUpdate → host.LateUpdate
+  * OnDestroy → host.Shutdown
+- DontDestroyOnLoad 默认开启（业务可子类 override MakeDontDestroyOnLoad）
+- **不定义 IEntry interface**（与 V0.7 Samples/Net/Entry.cs 决策一致）— Unity MonoBehaviour 与 .NET Main(string[]) 形态本质不同，5 个商业 Unity 框架均无 IEntry interface
+- Samples/Net/Entry.cs 保持不变（V0.7 已成形）
+
+### 迭代 5 — V1.0 收尾
+
+**Added**
+- `docs/adr/0019-network-abstraction-positioning.md`：网络抽象层定位 ADR（Core 持契约 + Adapter 持实现的分层决策 + IPlugPoint vs ModuleHost 横切的关系矩阵）
+
+**Modified**
+- `CHANGELOG.md`：本段
+- `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`：V1.0 段
+- `docs/strategy/V2-roadmap-tasks.md`：V1.0 段路线修订（MMO demo → V1.2 Demo minor）
+
+**累计 V1.0 产物**
+- 2 个 ADR（0018 Shared 边界 + 0019 网络抽象定位）
+- 1 个新 csproj（Samples/Shared）+ 1 个 Unity asmdef（Samples/Unity/Entry）
+- 8 个 Core 契约文件（INetClient/Server/Connection/Message + ConnectionId/State + 5 IPlugPoint + ITickLoop/IFrameLoop）
+- 1 个 MonoBehaviour 模板（TryGetMonoEntry）
+- 全套契约 - dotnet build 0/0（Shadow + Shared + Net + Samples/Net），Unity 端 .meta 待 Editor 内自动生成
+
+**V1.0 不做（明确推迟）**
+- KCP / LiteNetLib / TCP / WebSocket Adapter 实现 → V1.1
+- MemoryPack 等序列化 Adapter 实现 → V1.1
+- ServerTickDriver / UnityFrameDriver 等 driver 实现 → V1.1
+- MMO 业务 Demo → V1.2 Demo minor
+- Actor / MailBox / Location 抽象 → V2.0+ 业务层
+
+
 ## V0.9.5 — Source Generator 注册（**完整落地** — 7/7 Iter）
 
 > 独立 minor。V0.9 PRD 拆分时确认：Source Generator 涉及独立 csproj + Unity asmdef + RoslynAnalyzer 集成 + 多 attribute + IIncrementalGenerator 管线。本 minor 完整落地 Iter 0-7，覆盖 [Module] / [SystemRegister] / [EventHandler] / IComponentSystem 四个自动注册场景。

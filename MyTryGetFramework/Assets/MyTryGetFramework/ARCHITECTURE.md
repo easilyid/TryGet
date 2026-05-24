@@ -271,8 +271,39 @@ host.Shutdown();               // 逆序
   - `[Info] CounterSystem observed AttachCount=1 DetachCount=1`（IComponentSystem auto-hook）
 - **Shadow csproj / Generator csproj / Samples/Net 全套 0/0**
 
-### V1.0 — 真双端样例 + 文档冻结
-- `Samples/Net/MmoServerDemo` + `Samples/Unity/MmoClientDemo` 共享 Aspect/Entity 代码
+### V1.0 — 双端架构契约 + 网络抽象层 + Shared 代码边界（**完整落地** — 5/5 Iter，待 tag v1.0.0）
+- **目标**：定义双端架构契约 + 跨端共享代码边界 + 网络层抽象，让 V1.1+ Adapter 实现有清晰落地点
+- **路线重定向**（2026/05/24 用户指令"业务逻辑先轻放"）：
+  - 原 V1.0 = MMO Server/Client Demo（业务重）改为"框架契约"（架构层 only）
+  - MMO demo 推迟到 V1.2 Demo minor（依赖 V1.1 Adapter 实现）
+- **关键决策**：
+  - Core 持网络契约（接口 + marker + IPlugPoint），不含具体协议实现（KCP/LiteNetLib/TCP 全部留 V1.1+ Adapter；详见 ADR-0019）
+  - 新增 `Samples/Shared/` csproj 层承载跨端业务代码（netstandard2.1，源引用接入 Unity，详见 ADR-0018）
+  - 复用 V0.9 IPlugin/IPluginHost/IPlugPoint 机制承载网络生命周期事件（5 件 IPlugPoint）
+  - Unity 端 TryGetMonoEntry MonoBehaviour 模板（业务子类化即用），不定义 IEntry interface（与 V0.7 Net Entry 决策一致）
+  - 简化 vs hsenl：不暴露 buffer-level event；不引入 Service 中间层
+- 文件：`Samples/Shared/TryGet.Shared.csproj` + `SharedInfo.cs`（placeholder）
+- 文件：`Runtime/Core/Net/`：INetClient + INetServer + INetMessage + ConnectionId + NetPlugPoints (5 件)
+- 文件：`Runtime/Core/Time/`：ITickLoop + IFrameLoop
+- 文件：`Assets/.../Samples/Unity/Entry/TryGetMonoEntry.cs` + Unity asmdef
+- 文档：`docs/design/V1.0-architecture-contracts.md`（PRD）+ `docs/adr/0018-shared-code-boundary.md` + `docs/adr/0019-network-abstraction-positioning.md`
+- **Iter 0**（已落地）：V1.0 PRD（4 框架对标 + Samples/Shared / 网络抽象 / 时间循环 / 双端 Entry 详细 API + Iter 拆分）
+- **Iter 1**（已落地）：Samples/Shared csproj 物理结构 + ADR-0018 Shared 代码边界规范
+- **Iter 2**（已落地）：INetClient / INetServer / IConnection / INetMessage + ConnectionId + ConnectionState + 5 IPlugPoint 网络生命周期契约
+- **Iter 3**（已落地）：ITickLoop / IFrameLoop 双端时间循环抽象
+- **Iter 4**（已落地）：TryGetMonoEntry Unity MonoBehaviour 模板 + 独立 asmdef
+- **Iter 5**（本 Iter）：CHANGELOG + ARCHITECTURE V1.0 段 + ADR-0019 网络抽象层定位 + 路线图修订
+- **Shadow csproj + Shared csproj + Samples/Net 三套 0/0**；Unity 端 .meta 待 Editor 自动生成
+
+### V1.1 — 网络 Adapter + 序列化 Adapter（待启动）
+- 范围：KCP / LiteNetLib / TCP INetClient/Server 实现 + MemoryPack ISerializer 实现 + ServerTickDriver
+- 各 Adapter 在 `Adapters/Network.*/` `Adapters/MemoryPack/` 等独立 csproj，含各自 nuget 依赖
+- 不属于 Core 范围
+
+### V1.2 — MMO 真双端 Demo（待启动）
+- `Samples/Net/MmoServerDemo`（dotnet console 服务端，依赖 V1.1 KCP Adapter）
+- `Samples/Unity/MmoClientDemo`（Unity Play 客户端）
+- 跨端共享业务 Aspect / 网络消息 struct 真填入 `Samples/Shared/`
 - 对标 ET All-in-One 轻量版
 
 ### V1.1+ — 业务扩展层（独立仓库或 Samples/）

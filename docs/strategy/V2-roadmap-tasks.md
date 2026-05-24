@@ -187,17 +187,61 @@ Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 
 
 ### 5.1 V1.0 总目标
 
-发布一份真正的双端 demo：服务端 dotnet console + 客户端 Unity Play，共享 Aspect/Entity/网络消息代码。
+发布**双端架构契约 + 网络抽象 + Shared 边界规范**。2026/05/24 用户指令"业务逻辑先轻放"重定向 — 原 MMO demo 推迟到 V1.2，本 V1.0 聚焦框架层契约。
 
-### 5.2 V1.0 Epic 列表
+### 5.2 V1.0 Epic 列表（已全部完成）
+
+| Epic | 范围 | 状态 | 关键产物 |
+|---|---|---|---|
+| **E1** | `Samples/Shared/TryGet.Shared.csproj` + ADR-0018 Shared 边界规范 | **Done (Iter 1)** | Shared csproj + 跨端业务代码承载层 |
+| **E2** | `Runtime/Core/Net/` 网络抽象层（INetClient/Server/Connection/Message + ConnectionId/State + 5 IPlugPoint） | **Done (Iter 2)** | Core 契约 only，无具体协议实现 |
+| **E3** | `Runtime/Core/Time/` ITickLoop / IFrameLoop 时间循环抽象 | **Done (Iter 3)** | 服务端 fixed-tick + 客户端可变-帧契约 |
+| **E4** | `Samples/Unity/Entry/TryGetMonoEntry` MonoBehaviour 模板 | **Done (Iter 4)** | Unity 端启动标准模板 + 独立 asmdef |
+| **E5** | CHANGELOG + ARCHITECTURE V1.0 段 + ADR-0019 网络抽象定位 + 路线图修订 | **Done (Iter 5)** | 一个大 commit |
+| ~~**E6**~~ | ~~MMO Server/Client Demo~~ | **→ V1.2 Demo minor** | 业务 demo 不属本 minor |
+
+### 5.3 V1.0 决策点结论
+
+- **路线重定向（业务逻辑先轻放）**：原 V1.0 MMO demo 改为框架契约 minor，MMO demo 推迟 V1.2 Demo minor（依赖 V1.1 网络 Adapter 实现）
+- **Core 持网络契约，不含实现**（ADR-0019）：KCP / LiteNetLib / TCP 全部留 V1.1+ Adapter 范围
+- **Samples/Shared 源引用接入 Unity**（ADR-0018）：放弃 Plugin DLL 路线（避免调试 step-into 体验差）
+- **不定义 IEntry interface**（与 V0.7 决策一致）：5 商业框架（Fantasy/ET/BigCat/hsenl/TEngine）均无此抽象
+- **复用 V0.9 IPlugin 机制承载网络生命周期事件**：5 件 IPlugPoint（IOnConnectionStarted / Closed / RawDataReceived / MessageReceived / NetError）
+
+### 5.4 V1.0 端到端验证证据
+
+```
+$ cd ServerProject/MyTryGetFramework.Core && dotnet build     # 0/0
+$ cd Samples/Shared && dotnet build                            # 0/0
+$ cd Samples/Net && dotnet build                               # 0/0
+$ cd Tools/MyTryGetFramework.SourceGenerator && dotnet build   # 0/0
+```
+
+V1.0 契约 minor，无实现也无 demo 程序需要运行。Unity 端 .meta 待 Editor 内自动生成；
+Unity 端 PlayMode 测试集成留 V1.1 Adapter 落地后再做。
+
+---
+
+## 5.5 V1.1 — 网络 / 序列化 Adapter（待启动）
 
 | Epic | 范围 | 关键产物 |
 |---|---|---|
-| **E1** | `Samples/Shared/TryGet.Shared.csproj` + asmdef | 双端共享代码物理位置确立 |
-| **E2** | `Samples/Net/MmoServerDemo` | dotnet console 服务端：10 客户端连接 / 广播 / 断线重连 |
-| **E3** | `Samples/Unity/MmoClientDemo` | Unity Play 客户端：连服务端 / 收广播 / 显示 |
-| **E4** | 共享 Aspect / Entity / 网络消息 | 一份代码两端工作的最小可信样例 |
-| **E5** | 文档冻结：`ARCHITECTURE.md` V1.0 完整版 + 所有 ADR 状态确认 | review 通过 + tag `v1.0.0` |
+| **E1** | KCP Adapter（`Adapters/Network.Kcp/`） | INetClient/Server 首个真实现，验证 Core 契约可用性 |
+| **E2** | LiteNetLib Adapter（`Adapters/Network.LiteNetLib/`） | 验证多 Adapter 切换 |
+| **E3** | MemoryPack Adapter（`Adapters/MemoryPack/`） | ISerializer 真实现（INetMessage 序列化） |
+| **E4** | ServerTickDriver / UnityFrameDriver（`Samples/Net/*` / `Samples/Unity/*`） | ITickLoop / IFrameLoop driver 实例 |
+| **E5** | 网络中间件 Plugin 示例（心跳 / 重连 / 流量监控） | V0.9 IPlugin + V1.0 IPlugPoint 复用范例 |
+
+## 5.6 V1.2 — MMO 真双端 Demo（待启动）
+
+> 依赖 V1.1 Adapter 实现。原 V1.0 路线，按用户 2026/05/24 指令"业务逻辑先轻放"推迟到此。
+
+| Epic | 范围 | 关键产物 |
+|---|---|---|
+| **E1** | `Samples/Net/MmoServerDemo` | dotnet console 服务端：10 客户端连接 / 广播 / 断线重连 |
+| **E2** | `Samples/Unity/MmoClientDemo` | Unity Play 客户端：连服务端 / 收广播 / 显示 |
+| **E3** | 共享业务 Aspect / Entity / 网络消息（填入 `Samples/Shared/`） | 一份代码两端工作的最小可信样例 |
+| **E4** | 文档冻结：`ARCHITECTURE.md` V1.2 完整版 + 所有 ADR 状态确认 | review 通过 + tag `v1.2.0` |
 
 ---
 
