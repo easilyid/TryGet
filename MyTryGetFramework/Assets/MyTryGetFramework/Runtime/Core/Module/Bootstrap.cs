@@ -40,6 +40,9 @@ namespace TryGet
             // 阶段累计的 [Module] 自动注册委托
             AssemblyManifestRegistry.ApplyAll(host);
 
+            // V0.9.5：应用 [EventHandler] 自动 Subscribe 到 host.EventBus
+            EventHandlerRegistry.ApplyAll(host.EventBus);
+
             return host;
         }
     }

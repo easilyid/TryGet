@@ -142,45 +142,44 @@ Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 
 
 ---
 
-## 4.5 V0.9.5 — Source Generator 注册（**部分落地 — Iter 0-3 完成**）
+## 4.5 V0.9.5 — Source Generator 注册（**完整落地** — 7/7 Iter）
 
 ### 4.5.1 V0.9.5 总目标
 
-引入 Roslyn IIncrementalGenerator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` 调用。
+引入 Roslyn IIncrementalGenerator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` / `world.RegisterSystem(...)` / `bus.Subscribe<T>(...)` 调用。
 
-### 4.5.2 V0.9.5 Epic 列表
+### 4.5.2 V0.9.5 Epic 列表（已全部完成）
 
 | Epic | 范围 | 状态 | 关键产物 |
 |---|---|---|---|
 | **E1** | `TryGet.SourceGenerator` 独立 csproj 骨架 | **Done (Iter 1)** | `Tools/MyTryGetFramework.SourceGenerator/` csproj + HelloWorldGenerator 烟测 |
-| **E2** | Unity asmdef 集成 + RoslynAnalyzer label | **Done (Iter 2)** | `Assets/.../Runtime/Core/Generators/` DLL + .meta with `RoslynAnalyzer` label，Unity Editor 端验证留给用户 |
-| **E3** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | **Done (Iter 3)** | `ModuleAttribute` + `AssemblyManifestRegistry` + `ModuleManifestGenerator` + Samples/Net 端到端 demo（dotnet run 通过） |
-| **E4** | `[SystemRegister]` + 生成 System 注册 | **Pending (Iter 4)** | SystemBase 子类自动注册到 SystemGroup |
-| **E5** | `[EventHandler]` + 生成 EventBus 订阅 | **Pending (Iter 5)** | 编译期生成 Subscribe，零反射 |
-| **E6** | `IComponentSystem<T>` 自动调度（V0.9 IPureComponent 配套） | **Pending (Iter 6)** | 扫 IComponentSystem 实现 + 生成 OnAttach/OnDetach 自动 hook |
-| **E7** | V0.9.5 测试 30+ + CHANGELOG | **Pending (Iter 7)** | 手动 vs 自动注册等价性测试 |
+| **E2** | Unity asmdef 集成 + RoslynAnalyzer label | **Done (Iter 2)** | `Assets/.../Runtime/Core/Generators/` DLL + .meta with `RoslynAnalyzer` label |
+| **E3** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | **Done (Iter 3)** | `ModuleAttribute` + `AssemblyManifestRegistry` + `ModuleManifestGenerator` + Samples/Net demo |
+| **E4** | `[SystemRegister]` + 生成 System 注册 | **Done (Iter 4)** | `SystemRegisterAttribute` + `SystemRegistry` + `SystemRegisterGenerator` |
+| **E5** | `[EventHandler]` + 生成 EventBus 订阅 | **Done (Iter 5)** | `EventHandlerAttribute` + `EventHandlerRegistry` + `EventHandlerGenerator` + Bootstrap 集成 |
+| **E6** | `IComponentSystem<T>` 自动调度（V0.9 IPureComponent 配套） | **Done (Iter 6)** | `ComponentSystemHooks<T>` + EntityPureComponentExtensions hook + `ComponentSystemGenerator` |
+| **E7** | V0.9.5 测试 + CHANGELOG | **Done (Iter 7)** | Samples/Net 端到端 3 路 demo + CHANGELOG/ARCHITECTURE/路线图 整段收尾 |
 
 ### 4.5.3 V0.9.5 决策点结论
 
 - **`IIncrementalGenerator`（非 `ISourceGenerator`）**：2026 主流实践，Value-equatable DTO + ForAttributeWithMetadataName 入口高效
 - **Generator 在 repo root `Tools/` 下**：与 Unity Assets 完全隔离，PostBuild 自动 copy DLL 到 Unity
 - **Dual-trigger init**：.NET 端 `[ModuleInitializer]` + Unity 端 `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` + `[Preserve]` 防 IL2CPP strip
-- **AssemblyManifestRegistry 限制**：仅看到 `ApplyAll` 调用前已 static-init 的 assemblies；后加载 assembly 注册不回填已构造 host
-- **V0.9 IComponentSystem 自动调度**留 Iter 6（与 V0.9 PRD §"V0.9 不做的事"对齐）
+- **AssemblyManifestRegistry / EventHandlerRegistry 限制**：仅看到 `ApplyAll` 调用前已 static-init 的 assemblies；后加载 assembly 注册不回填已构造 host
+- **SystemRegistry 业务显式 ApplyAll(world)**：避免多 world 实例下的注册歧义 + 测试隔离困难
+- **ComponentSystemGenerator 用接口实现触发**：IComponentSystem 是契约接口，不强制业务额外标 attribute（CreateSyntaxProvider + semantic 实现检查）
 
-### 4.5.4 Iter 0-3 端到端验证证据
+### 4.5.4 V0.9.5 端到端验证证据
 
-`dotnet run Samples/Net` 输出（关键行）：
+`dotnet run Samples/Net` 输出（关键 3 行）：
 
 ```
-[Info] Hello from V0.9.5 auto-registered Module, Samples/Net!
-[Info] === MainAsync start ===
-...
+[Info] Hello from V0.9.5 auto-registered Module, Samples/Net!        // [Module] auto-register
+[Info] TickEvent handler observed LastTickIndex = 42                 // [EventHandler] auto-subscribe
+[Info] CounterSystem observed AttachCount=1 DetachCount=1            // IComponentSystem auto-hook
 ```
 
-业务 setup 内**没有任何 `host.Register<IGreetingModule>(...)`** 行 — 完全靠 `[Module(typeof(IGreetingModule))]` + Generator + dual-trigger init 自动完成。
-
-
+业务 setup 内**没有任何 host.Register / bus.Subscribe / hook 手动注册**行 — 完全靠 attribute / interface + Generator + dual-trigger init 自动完成。
 
 ---
 

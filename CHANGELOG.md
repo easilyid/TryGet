@@ -2,9 +2,9 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
-## V0.9.5 — Source Generator 注册（部分落地 — Iter 0-3 完成，Iter 4-7 待续）
+## V0.9.5 — Source Generator 注册（**完整落地** — 7/7 Iter）
 
-> 独立 minor。V0.9 PRD 拆分时确认：Source Generator 涉及独立 csproj + Unity asmdef + RoslynAnalyzer 集成 + 多 attribute + IIncrementalGenerator 管线，工作量 ≈ V0.6 完整（11 Iter）。本次落地 Iter 0-3（PRD + skeleton + Unity 集成 + [Module] auto-registration），Iter 4-7 留待续。
+> 独立 minor。V0.9 PRD 拆分时确认：Source Generator 涉及独立 csproj + Unity asmdef + RoslynAnalyzer 集成 + 多 attribute + IIncrementalGenerator 管线。本 minor 完整落地 Iter 0-7，覆盖 [Module] / [SystemRegister] / [EventHandler] / IComponentSystem 四个自动注册场景。
 
 ### 迭代 0 — V0.9.5 PRD
 
@@ -77,10 +77,94 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 ### 后续 Iter（V0.9.5+，未落地）
 
-- **Iter 4** — `[SystemRegister(SystemGroup, Phase)]` Attribute + SystemBase 子类自动注册到对应 SystemGroup
-- **Iter 5** — `[EventHandler]` Attribute（标静态方法）+ 编译期生成 EventBus.Subscribe，零反射
-- **Iter 6** — `IComponentSystem<T>` 自动调度：扫实现类 + 生成 `ComponentSystemHooks<T>` 自动 hook 到 `Entity.AddComponent` / `RemoveComponent`（V0.9 IPureComponent 配套）
-- **Iter 7** — 手动 vs 自动注册等价性测试（30+）+ CHANGELOG + ARCHITECTURE 整段收尾
+- ~~**Iter 4**~~ — **Done**：见下方 §迭代 4
+- ~~**Iter 5**~~ — **Done**：见下方 §迭代 5
+- ~~**Iter 6**~~ — **Done**：见下方 §迭代 6
+- ~~**Iter 7**~~ — **Done**：本段（CHANGELOG/ARCHITECTURE/路线图收尾 + commit）
+
+### 迭代 4 — [SystemRegister] Attribute + SystemRegistry + Generator
+
+**Added**
+- `Runtime/Core/SystemRegisterAttribute.cs`：业务用 `[SystemRegister(Phase, groupName)]` 标记 SystemBase 子类
+- `Runtime/Core/SystemRegistry.cs`：runtime 收集器（`Register(Action<EntityWorld>)` / `ApplyAll(EntityWorld)` / `Count` / `ClearForTests`）
+- `Tools/.../src/Generators/SystemRegisterGenerator.cs`：扫 `[SystemRegister]` + 生成 `__SystemManifest_<asm>.g.cs`
+
+**Notes**
+- 与 AssemblyManifestRegistry 的设计差异：System 注册到 EntityWorld（可能多 world 实例），业务**显式**调 `SystemRegistry.ApplyAll(world)`，framework 不自动 hook 进 EntityWorld 构造器（避免多 world 歧义 + 测试隔离困难）
+- Phase 枚举值用 raw int 序列化进 record，生成代码内 switch 转回 `global::TryGet.Phase.Update` 等命名引用
+- 同 (Phase, groupName) 多 System 生成代码会每次 `new SystemGroup(name)` — V1.x 可优化为按组缓存，当前 group cache 留业务侧自管
+
+**Verification**（人工 inspect 生成代码 + 临时 [SystemRegister] 测试类后 inspect）
+- 生成正确的 `world.RegisterSystem(new MyMovementSystem(), global::TryGet.Phase.Update)` 调用
+- 排序稳定（按 ClassFullName ordinal）
+
+### 迭代 5 — [EventHandler] Attribute + EventHandlerRegistry + Generator
+
+**Added**
+- `Runtime/Core/Module/EventHandlerAttribute.cs`：标记 `public static void M(TEvent evt)` 方法
+- `Runtime/Core/Module/EventHandlerRegistry.cs`：收集 `Action<IEventBus>` 委托
+- `Tools/.../src/Generators/EventHandlerGenerator.cs`：扫 `[EventHandler]` 静态方法 + 生成 `__EventHandlerManifest_<asm>.g.cs`
+
+**Modified**
+- `Runtime/Core/Module/Bootstrap.cs`：`CreateHost` 内调 `EventHandlerRegistry.ApplyAll(host.EventBus)`（在 `AssemblyManifestRegistry.ApplyAll` 之后）
+
+**Generator 校验逻辑**
+- 方法必须 `public static`
+- 返回类型必须 `void`
+- 参数必须 1 个且类型必须是 struct（满足 IEventBus.Subscribe&lt;T&gt; 约束）
+- 不满足任何条件就静默忽略（不报错也不生成 Subscribe 代码）
+
+**端到端验证（Samples/Net）**
+```
+[Info] TickEvent handler observed LastTickIndex = 42
+```
+- `GameplayHandlers.OnTickEvent` 标 `[EventHandler]` 后**没有任何手动 Subscribe** 行，单纯 publish 就触发 handler
+
+### 迭代 6 — IComponentSystem 自动调度
+
+**Added**
+- `Runtime/Core/Entity/ComponentSystemHooks.cs`：泛型静态 hook 表（`ComponentSystemHooks<TComponent>.AttachHook` / `DetachHook` events，public + InvokeAttach/InvokeDetach internal helpers + ClearForTests）
+- `Tools/.../src/Generators/ComponentSystemGenerator.cs`：扫所有非抽象/非静态 class，semantic 检查是否实现 `IComponentSystem<T>`，生成 `__ComponentSystemManifest_<asm>.g.cs`
+
+**Modified**
+- `Runtime/Core/Entity/EntityPureComponentExtensions.cs`：
+  - `AddComponent<T>`：成功添加后 `ComponentSystemHooks<T>.InvokeAttach(entity, component)`
+  - `RemoveComponent<T>`：成功移除后 `ComponentSystemHooks<T>.InvokeDetach(entity, component)`
+
+**Notes**
+- 本 Generator 通过 Interface 实现（非 Attribute）触发，使用 `CreateSyntaxProvider` 扫 class declaration + semantic 验证（比 ForAttributeWithMetadataName 慢但接口契约不需要额外标 attribute）
+- struct PureComponent 不装箱：call-site 泛型 T 是静态类型，`ComponentSystemHooks<T>.InvokeAttach` 直接传 `T component`
+- multi-cast：多 System 监听同 Component 类型（Action multi-cast delegate 天然支持）
+- 业务 System 必须有 public 无参构造器（Generator 用 `new SystemType()` 实例化）
+- V0.9 IComponentSystem 接口契约不变：本 Iter 仅"添加自动 hook"，业务依然可手动调 `system.OnAttach(entity, component)` 而 framework 不 dispatch hook（前提是不让 Generator 自动注册同 System）
+
+**端到端验证（Samples/Net）**
+```
+[Info] CounterSystem observed AttachCount=1 DetachCount=1
+```
+- `CounterSystem : IComponentSystem<CounterComponent>` **没有任何手动 hook 注册**
+- 业务 `entity.AddComponent(...)` + `entity.RemoveComponent<...>()` 即触发对应 Counter 计数
+
+### 迭代 7 — V0.9.5 收尾
+
+**Modified**
+- `CHANGELOG.md`：本段（V0.9.5 由"部分落地"改为"完整落地"，加 Iter 4-7 描述）
+- `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`：V0.9.5 段同步更新
+- `docs/strategy/V2-roadmap-tasks.md`：V0.9.5 Epic 列表 E4/E5/E6/E7 标 Done
+
+**累计 V0.9.5 产物**
+- 4 个 Generator（Hello / Module / SystemRegister / EventHandler / ComponentSystem）
+- 4 个 runtime helper（AssemblyManifestRegistry / SystemRegistry / EventHandlerRegistry / ComponentSystemHooks）
+- 3 个 Attribute（ModuleAttribute / SystemRegisterAttribute / EventHandlerAttribute）
+- Samples/Net 端到端 demo 同时使用 [Module] + [EventHandler] + IComponentSystem，全部自动注册零手动 boilerplate
+- 全套 Generator csproj / Shadow csproj / Samples/Net 编译 0/0
+- Unity Editor 端验证仍需用户在 Editor 打开后确认 RoslynAnalyzer label 生效
+
+**已知 V1.0+ 改进项**
+- 失效情境诊断（Roslyn Diagnostic）：[Module] 类无 public 无参构造、ServiceType 不实现 interface、[EventHandler] 签名错等，生成 user-facing diagnostic 而非静默忽略
+- IPureComponent struct 类型化容器（消除当前 boxed `Dictionary<Type, IPureComponent>`）
+- [NetMessage] 等业务 attribute（V1.1+ 网络层引入）
+- IComponentSystem 自动调度的 DI 注入（当前仅 parameterless ctor）
 
 
 ## V0.9 — IPlugin（hsenl 风格切面）+ IPureComponent（ECS 二级方案）

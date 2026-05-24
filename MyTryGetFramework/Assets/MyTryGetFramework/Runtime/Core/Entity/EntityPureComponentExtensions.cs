@@ -18,12 +18,14 @@ namespace TryGet
         /// <summary>
         /// 添加 PureComponent 到 Entity。
         /// 同类型重复添加抛 <see cref="InvalidOperationException"/>；Entity 已销毁抛 <see cref="InvalidOperationException"/>。
+        /// V0.9.5 起：成功添加后触发 <see cref="ComponentSystemHooks{T}.AttachHook"/>（若有 [IComponentSystem] 自动注册）。
         /// </summary>
         public static void AddComponent<T>(this Entity entity, T component) where T : IPureComponent
         {
             if (entity == null) throw new ArgumentNullException(nameof(entity));
             if (component == null) throw new ArgumentNullException(nameof(component));
             entity.AddPureComponentInternal(typeof(T), component);
+            ComponentSystemHooks<T>.InvokeAttach(entity, component);
         }
 
         /// <summary>
@@ -47,12 +49,21 @@ namespace TryGet
 
         /// <summary>
         /// 移除 PureComponent。Entity 已销毁抛 <see cref="InvalidOperationException"/>。
+        /// V0.9.5 起：成功移除后触发 <see cref="ComponentSystemHooks{T}.DetachHook"/>。
         /// </summary>
         /// <returns>是否真的移除了。</returns>
         public static bool RemoveComponent<T>(this Entity entity) where T : IPureComponent
         {
             if (entity == null) throw new ArgumentNullException(nameof(entity));
-            return entity.RemovePureComponentInternal(typeof(T));
+
+            // 先取到将被移除的 component，方便触发 DetachHook
+            if (!entity.TryGetPureComponentInternal(typeof(T), out var existing))
+                return false;
+
+            bool removed = entity.RemovePureComponentInternal(typeof(T));
+            if (removed)
+                ComponentSystemHooks<T>.InvokeDetach(entity, (T)existing);
+            return removed;
         }
 
         /// <summary>当前 PureComponent 数量。</summary>

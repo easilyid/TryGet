@@ -4,7 +4,7 @@ using TryGet;
 namespace TryGet.Samples.Net
 {
     /// <summary>
-    /// V0.9.5 Iter 3 — Source Generator 自动注册 demo。
+    /// V0.9.5 Iter 3 + Iter 5 — Source Generator 自动注册 demo。
     ///
     /// <see cref="GreetingModule"/> 类标了 <see cref="ModuleAttribute"/>，
     /// 编译期 Source Generator 会在此 assembly 生成 <c>__AssemblyManifest_TryGet_Samples_Net</c>，
@@ -12,9 +12,12 @@ namespace TryGet.Samples.Net
     /// <c>[RuntimeInitializeOnLoadMethod]</c> 自动把注册委托交给
     /// <see cref="AssemblyManifestRegistry"/>。
     ///
-    /// <see cref="Bootstrap.CreateHost"/> 在创建 host 时调
-    /// <see cref="AssemblyManifestRegistry.ApplyAll"/> 应用所有委托，于是 IGreetingModule
-    /// 不需要在 setup 里手动 <c>host.Register&lt;IGreetingModule&gt;(...)</c>。
+    /// <see cref="GameplayHandlers.OnTickEvent"/> 标了 <see cref="EventHandlerAttribute"/>，
+    /// Generator 在 <c>__EventHandlerManifest_TryGet_Samples_Net</c> 内通过同样的 dual-trigger
+    /// init 把 handler 注册到 <see cref="EventHandlerRegistry"/>。
+    ///
+    /// <see cref="Bootstrap.CreateHost"/> 调 <see cref="AssemblyManifestRegistry.ApplyAll"/> +
+    /// <see cref="EventHandlerRegistry.ApplyAll"/> 让两者都生效。
     /// </summary>
     public interface IGreetingModule : IModule
     {
@@ -31,4 +34,40 @@ namespace TryGet.Samples.Net
 
         public string Greet(string who) => $"Hello from V0.9.5 auto-registered Module, {who}!";
     }
+
+    /// <summary>Iter 5 demo 事件类型。struct 满足 IEventBus 约束。</summary>
+    public readonly struct TickEvent
+    {
+        public readonly int Index;
+        public TickEvent(int index) { Index = index; }
+    }
+
+    /// <summary>Iter 5 demo handler 容器。带 [EventHandler] 的静态方法被 Generator 自动 Subscribe。</summary>
+    public static class GameplayHandlers
+    {
+        public static int LastTickIndex = -1;
+
+        [EventHandler]
+        public static void OnTickEvent(TickEvent evt)
+        {
+            LastTickIndex = evt.Index;
+        }
+    }
+
+    /// <summary>Iter 6 demo PureComponent。</summary>
+    public sealed class CounterComponent : IPureComponent
+    {
+        public int Value;
+    }
+
+    /// <summary>Iter 6 demo System。实现 IComponentSystem 即被 Generator 自动 hook 到 ComponentSystemHooks。</summary>
+    public sealed class CounterSystem : IComponentSystem<CounterComponent>
+    {
+        public static int AttachCount;
+        public static int DetachCount;
+
+        public void OnAttach(Entity entity, CounterComponent component) { AttachCount++; }
+        public void OnDetach(Entity entity, CounterComponent component) { DetachCount++; }
+    }
 }
+

@@ -46,6 +46,17 @@ namespace TryGet.Samples.Net
             var greeter = host.Get<IGreetingModule>();
             log.Info(greeter.Greet("Samples/Net"));
 
+            // V0.9.5 Demo: GameplayHandlers.OnTickEvent 由 [EventHandler] 自动 Subscribe。
+            host.EventBus.Publish(new TickEvent(42));
+            log.Info($"TickEvent handler observed LastTickIndex = {GameplayHandlers.LastTickIndex}");
+
+            // V0.9.5 Demo: CounterSystem 实现 IComponentSystem，被自动 hook 到 AttachHook/DetachHook。
+            var world = new EntityWorld("Demo");
+            var e = world.CreateEntity();
+            e.AddComponent(new CounterComponent { Value = 1 });
+            e.RemoveComponent<CounterComponent>();
+            log.Info($"CounterSystem observed AttachCount={CounterSystem.AttachCount} DetachCount={CounterSystem.DetachCount}");
+
             log.Info("=== MainAsync start ===");
 
             proc.Start("boot");
