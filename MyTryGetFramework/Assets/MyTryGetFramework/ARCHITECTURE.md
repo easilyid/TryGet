@@ -174,10 +174,23 @@ host.Shutdown();               // 逆序
 - **测试**：累计 ~89 EditMode 测试，Shadow csproj 0 警告 0 错误，Samples/Net `dotnet run` 流程跑通
 - **DoD 状态**：#1 √ / #2 待 V0.7 IEntry / #3 软达成（完全达成留 V0.6.5 池化 tcs）/ #4 √ / #5 √（89 测试，需 Unity Editor 跑全套）/ #6 √
 
-### V0.7 — 双端入口规范 + ILogger + IClock
-- 对标 Fantasy `Platform.Unity.Entry` vs `Platform.Net.Entry`
-- `ILogModule` → `ILogger`；新增 `IClock`（解耦 Unity Time）
-- `Samples/Net/Program.cs`（dotnet console 启动）+ `Samples/Unity/TryGetMonoEntry.cs`
+### V0.7 — Bootstrap + ILogger + IClock + IEventScope（**完整落地** — 6/6 Iter，待 tag v0.7.0）
+- **目标**：Core 获得双端入口规范 + 日志接口现代化 + 时钟解耦 + 订阅作用域
+- **关键决策**：**不定义 IEntry interface**（参考 Fantasy/ET/BigCat/TEngine/hsenl 实践，5 个商业框架均未做）
+- 文件：`Core/Common/`：`IClock.cs`（含 SystemClock）/ `ILogger.cs` / `ConsoleLogger.cs` / `LogModuleAdapter.cs`
+- 文件：`Core/Module/`：`Bootstrap.cs` / `BootstrapOptions.cs` / `IEventScope.cs`（含 EventScope）/ `EventBusScopeExtensions.cs`
+- 文件：`Core/Entity/EntityEventScopeExtensions.cs`
+- 文件：`Samples/Net/`：`Entry.cs`（新）+ `Program.cs`（重构）
+- 文件修改：`LogLevel.cs`（+Trace）/ `ILogModule.cs`（[Obsolete]）/ `ConsoleLogModule.cs`（[Obsolete]）
+- **Iter 0**（已落地）：PRD `docs/design/V0.7-bootstrap-logger-clock.md`（4 维度调研对比 + API 设计）
+- **Iter 1**（已落地）：IClock + SystemClock（Priority=-900，每帧 host.Update 注入 dt）
+- **Iter 2**（已落地）：ILogger + ConsoleLogger + LogModuleAdapter 桥接（命名对齐 .NET ILogger）
+- **Iter 3**（已落地）：Bootstrap + Net Entry pattern + Samples/Net 重构 + ILogModule [Obsolete]
+- **Iter 4**（已落地）：IEventScope（TryGet 创新点，参考框架均未实现）+ IEventBus / Entity scope 扩展
+- **Iter 5**（本 Iter）：CHANGELOG + ARCHITECTURE V0.7 段 + commit
+- **测试**：累计 35 EditMode 新增（8 SystemClock + 14 Logger + 13 EventScope），DoD #5 要求 20+ 已超额
+- **Sample 验证**：`Samples/Net dotnet run` 跑通同等行为（Boot→Login→InGame，~1.8s）
+- **已知保留**：Unity 端 Entry（MonoBehaviour 启动）留 V1.0+ Samples/Unity 落地；V0.8 删除 ILogModule + ConsoleLogModule + LogModuleAdapter
 
 ### V0.8 — 配置 + 序列化重构
 - `IResourceModule` → `IAssetSource + ISerializer`

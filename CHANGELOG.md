@@ -2,6 +2,124 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.7 — Bootstrap + ILogger + IClock + IEventScope
+
+### 迭代 0 — V0.7 PRD
+
+**Added**
+- `docs/design/V0.7-bootstrap-logger-clock.md`：4 维度调研对比（Fantasy/ET/BigCat/TEngine/hsenl + Microsoft.Extensions.Logging + UniTask 时钟）+ API 详细设计 + Iter 拆分 + 破坏性变更清单 + 已知风险
+
+**Notes**
+- 调研发现：**没有商业 Unity 框架定义 IEntry interface**（Fantasy 用两个独立 Entry 类 + ET 用 Init/Program.cs + BigCat 用 GameLauncher）— 路线图原 "IEntry / Bootstrap 双端入口规范" 修正为 "Bootstrap + Net Entry pattern"（无 IEntry interface）
+- ILogger 命名对齐 .NET 标准（非 Fantasy/hsenl `ILog`），方法签名故意简化（无 structured logging / 无泛型 / 无 factory）
+- IClock 不暴露 wall-clock（DateTime），仅 game-frame 取向（DeltaTime/ElapsedTime/FrameCount），对标 BigCat TimeModule
+- IEventScope 是 TryGet 创新点（5 个参考框架均未实现）
+
+### 迭代 1 — IClock + SystemClock
+
+**Added**
+- `Runtime/Core/Common/IClock.cs`：`IClock : IModule` 接口（`DeltaTime` / `UnscaledDeltaTime` / `ElapsedTime` / `UnscaledElapsedTime` / `FrameCount`）
+- `SystemClock : IClock, IUpdateModule`：Net/Headless 默认实现，Priority=-900，每帧 host.Update 注入 dt 累加
+
+**Tests** — `SystemClockTests.cs`（8 测试）
+- 初始零值；Update 设当前 dt；累计 ElapsedTime；scaled vs unscaled 独立追踪；FrameCount 单调递增
+- Shutdown 重置；ModuleHost 注册 + Initialize + Update 完整驱动
+- Priority 验证：sentinel Module 在自己 Update 时观察到 clock.FrameCount=1（说明 SystemClock 先于业务 Module）
+
+**Verified**
+- Shadow csproj 0 警告 0 错误
+
+### 迭代 2 — ILogger + ConsoleLogger + LogModuleAdapter
+
+**Added**
+- `Runtime/Core/Common/ILogger.cs`：新接口，命名对齐 .NET `Microsoft.Extensions.Logging.ILogger`
+  - 方法 `Trace/Debug/Info/Warn/Error(string)` + `Error(string, Exception)`
+  - **不做** structured logging / `ILogger<T>` 泛型 / factory（V1.0+ 评估）
+- `Runtime/Core/Common/ConsoleLogger.cs`：`ILogger` 默认实现（功能等价 `ConsoleLogModule`，Priority=-1000）
+- `Runtime/Core/Common/LogModuleAdapter.cs`：把 `ILogModule` 桥接为 `ILogger`，支持业务渐进迁移；`Trace` 走 `Debug` 加前缀 `[TRACE] `
+
+**Modified**
+- `Runtime/Core/Common/LogLevel.cs`：新增 `Trace = -1`（在 `Debug` 之下，最详细），不破坏现有 enum 值
+
+**Tests** — `LoggerTests.cs`（14 测试）
+- ConsoleLogger 级别过滤（Trace/Debug/Error 等）；OnLog 钩子；Error+Exception；Shutdown 后静默
+- ModuleHost 集成；Priority=-1000 验证
+- LogModuleAdapter 全级别桥接；Trace 转 Debug 加 `[TRACE] ` 前缀；MinimumLevel 双向同步；null inner 抛；Error+Exception 转发
+
+### 迭代 3 — Bootstrap + Net Entry pattern + Samples/Net 重构 + ILogModule Obsolete
+
+**Added**
+- `Runtime/Core/Module/Bootstrap.cs`：静态工具类 `Bootstrap.CreateHost(options)` 自动注册 Core 基础三件套（ILogger + IClock + ITGTaskScheduler）
+- `Runtime/Core/Module/BootstrapOptions.cs`：可选注入自定义 Logger/Clock/Scheduler + 默认 `MinimumLogLevel`
+- `Samples/Net/Entry.cs`：Net 端启动模板，`Entry.Run(setup, mainAsync, options, frameSleepMs, timeoutMs)` 静态方法
+  - 主循环 + Stopwatch + Thread.Sleep + 异常处理 + 超时保护
+  - 返回值：0=成功 / 1=mainAsync 抛 / 2=超时 / 3=setup 抛
+
+**Modified**
+- `Samples/Net/Program.cs`：用 `Entry.Run` 重构，从 ~180 行降到 ~120 行；ILogModule → ILogger 全替换
+- `Runtime/Core/Common/ILogModule.cs`：加 `[Obsolete("Use ILogger (V0.7+). ILogModule will be removed in V0.8...")]`
+- `Runtime/Core/Common/ConsoleLogModule.cs`：加 `[Obsolete("Use ConsoleLogger (V0.7+)...")]`
+- `Runtime/Core/Common/LogModuleAdapter.cs`：内部加 `#pragma warning disable CS0618`（adapter 必须引用 Obsolete 的 ILogModule，是合法用法）
+
+**Verified**
+- Shadow csproj 0/0 持续
+- `Samples/Net/dotnet run` 跑通同等行为（Boot→Login→InGame，总时长 ≈ 1.8s，输出顺序与 V0.6 版本一致）
+
+**Notes**
+- **不定义 IEntry interface**（参考 Fantasy/ET/BigCat 实践，避免过度抽象）
+- V0.8 起删除 ILogModule + ConsoleLogModule + LogModuleAdapter（Obsolete 提前一个 minor 告警是 .NET 标准做法）
+
+### 迭代 4 — IEventScope（创新点）
+
+**Added**
+- `Runtime/Core/Module/IEventScope.cs`：`IEventScope : IDisposable` 接口 + `EventScope` 默认实现
+  - `Register(unsubscriber)` 接受"解绑动作"列表；`Dispose` 倒序执行（LIFO，与订阅顺序逆序）
+  - 重复 Dispose 静默 no-op；scope 已 Dispose 后 Register 立即触发以防泄漏
+  - unsubscriber 抛异常吞掉继续遍历（保证后续 handler 仍清理）
+- `Runtime/Core/Module/EventBusScopeExtensions.cs`：`IEventBus.CreateScope()` + `IEventBus.Subscribe<T>(handler, scope)` overload
+- `Runtime/Core/Entity/EntityEventScopeExtensions.cs`：`Entity.Subscribe<T>(handler, scope)` overload（Entity 销毁时 Unsubscribe 路径有 `IsDestroyed` 判断不抛）
+
+**Tests** — `EventScopeTests.cs`（13 测试）
+- EventScope 基础：初始未 Dispose / Register 计数 / null 参数抛 / Dispose 倒序解绑 / 重复 Dispose no-op
+- Dispose 后 Register 立即触发 unsubscriber（防泄漏）；unsubscriber 抛异常吞后继续
+- IEventBus 集成：with scope 订阅 → 收事件；scope.Dispose 后不再收；多 scope 隔离；混合事件类型；null 参数抛
+- Entity scope：订阅 + 销毁后 Dispose 不崩；跨 bus 单 scope Dispose 同时解绑 EventBus + Entity
+
+**Notes**
+- 创新点：5 个参考框架（Fantasy/ET/BigCat/TEngine/hsenl）均未实现订阅自动解绑机制
+- 灵感：`Microsoft.Extensions.Logging.ILogger.BeginScope` 模式扩展到 EventBus / Entity
+- 现有不带 scope 的 `Subscribe` API **完全保留**（无破坏，业务可渐进采用 scope）
+
+### 迭代 5 — CHANGELOG + ARCHITECTURE + commit
+
+**Modified**
+- 本 `CHANGELOG.md`：V0.7 完整段落
+- `Assets/MyTryGetFramework/ARCHITECTURE.md`：V0.7 段落新增（含 Iter 0-5 列表 + 测试计数）
+
+**Notes — V0.7 完成认证**
+- 累计 6 Iter（Iter 0-5），覆盖 PRD → IClock → ILogger → Bootstrap+Entry → IEventScope → 收尾
+- Core 新增 9 个文件（IClock/ILogger/ConsoleLogger/LogModuleAdapter/Bootstrap/BootstrapOptions/IEventScope/EventBusScopeExtensions/EntityEventScopeExtensions）
+- Core 修改 3 个文件（LogLevel +Trace / ILogModule [Obsolete] / ConsoleLogModule [Obsolete]）
+- Samples 新增 1 个文件 + 重构 Program.cs
+- 测试累计 35 个新增（V0.7 DoD #5 要求 20+，超额完成）：8 SystemClock + 14 Logger + 13 EventScope
+- Shadow csproj + Samples/Net dotnet run 持续 0/0
+
+**V0.7 DoD 状态**
+- ✓ Net Entry + Bootstrap 工作（Samples/Net dotnet run 跑通）
+- 待 Unity Entry（V1.0+ 落地，配合 Samples/Unity）
+- ✓ ILogger 替代 ILogModule（Obsolete + bridge 完整）
+- ✓ IClock 抽象时钟（不动 IUpdateModule.Update 签名，零破坏）
+- ✓ IEventScope（创新点，参考框架未实现）
+- ✓ 测试 20+
+- ✓ CHANGELOG / ARCHITECTURE 完整
+
+**已知保留**
+- Tests 中仍直接使用 ILogModule/ConsoleLogModule 的文件（LogModuleTests / ModuleHostEndToEndTests / LoginFlowDemoTests 等）— 测试本身验证 Obsolete API 行为，V0.8 删 ILogModule 时一并迁到 ILogger
+- `LogLevel.Trace` 在旧 `ILogModule` 路径无对应方法（强制业务迁移到 `ILogger`）
+- Unity 端的 `TryGet.Platform.Unity.Entry`（MonoBehaviour 启动）留 V1.0+ Samples/Unity 落地
+
+---
+
 ## V0.6 — ITask 异步原语自研（完整落地）
 
 ### 迭代 0 — V2 设计文档族 + V0.6 ITask PRD

@@ -4,6 +4,9 @@ namespace TryGet
     /// 日志服务契约（Common Module）。跨端可用，不依赖 Unity API。
     /// 默认实现 <c>ConsoleLogModule</c>；Unity 侧可通过 Adapter 替换为 <c>UnityLogModule</c>（写 UnityEngine.Debug）。
     /// </summary>
+    [System.Obsolete("Use ILogger (V0.7+). ILogModule will be removed in V0.8. Migration: replace " +
+        "host.Register<ILogModule>(new ConsoleLogModule()) with host.Register<ILogger>(new ConsoleLogger()), " +
+        "or use LogModuleAdapter to bridge existing ILogModule.")]
     public interface ILogModule : IModule
     {
         /// <summary>
