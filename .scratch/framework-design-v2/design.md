@@ -364,18 +364,17 @@ Core 模块（已完成）：
 - [x] **TimerModule 增强**：ScheduleRepeat + Pause/Resume（16 测试）。
 - [x] **AudioModule 增强**：Pause/Resume + PauseAll/ResumeAll（17 测试）。
 
-Unity Adapter（已落地，PlayMode 测试基建）：
+Unity Adapter（已落地，PlayMode 测试基建 + 5 Adapter 完整套件）：
 - [x] **Tests/PlayMode test asmdef**（基建）：所有 Adapter PlayMode 测试的复用底座。
-- [x] **UnityAudioModule Adapter**（Iter 6）：基于 AudioSource 池 + RegisterClip API，
-  11 PlayMode 测试。
+- [x] **UnityAudioModule Adapter**（Iter 6）：基于 AudioSource 池 + RegisterClip API，11 PlayMode 测试。
 - [x] **UnityInputModule Adapter**（Iter 7）：接 com.unity.inputsystem 1.18.0，
   RegisterButton/RegisterAxis/RegisterAxis2D + binding 字符串注册，11 PlayMode 测试。
+- [x] **PlayerPrefsSaveModule Adapter**（Iter 8）：接 PlayerPrefs，bool 编码 int 透明转换，16 PlayMode 测试。
+- [x] **UGUIUIModule Adapter**（Iter 9）：基于 UGUI Canvas，virtual 钩子供业务子类化，11 PlayMode 测试。
+- [x] **UnitySceneModule Adapter**（Iter 10）：接 SceneManager，Load 同步 / Unload 异步 fire-and-forget，13 PlayMode 测试。
 
-Adapter 仍待（V0.5 Gate 剩余）：
-- [ ] **UGUI Adapter**（`UGUIUIModule`）— Plan agent 推荐 Iter 8，UI 分层 / 数据传参由 Adapter 扩展
-- [ ] **UnitySceneModule Adapter**（接 SceneManager.LoadSceneAsync）
-- [ ] **PlayerPrefs Save Adapter**（或 FileBased / sqlite-net）
-- [ ] **YooAsset Adapter**（YooAsset 包未装，物理阻塞，待用户安装）
+Adapter 仍待（YooAsset 因包未装物理阻塞，待用户安装）：
+- [ ] **YooAsset Adapter**（YooAsset 包未装，物理阻塞）
 
 V0.5 原计划项（仍待）：
 - [ ] `IChannel` + `IMessageBus` 接口（Plan agent 建议与首个真实 Adapter 共生设计，不先孤立做）

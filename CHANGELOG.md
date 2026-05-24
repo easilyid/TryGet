@@ -102,14 +102,46 @@ Log(-1000) → Pool/Timer(-500) → Config(-460) → Save(-450) → Localization
 Resource(-400) → Audio(-380) → Input(-350) → UI(-300) → Scene(-250) →
 Procedure(-200) → EntityWorld(-100) → 业务(0)
 
+### 迭代 8 — PlayerPrefsSaveModule Adapter
+
+**Added**
+- `Runtime/Unity/Save/PlayerPrefsSaveModule.cs`：ISaveModule 的最简 Unity Adapter，接 UnityEngine.PlayerPrefs
+- bool 编码为 int (0/1) 透明转换（PlayerPrefs 原生只支持 string/int/float）
+- 内部 _keys HashSet 维护 KeyCount 诊断
+- Shutdown 不擦盘（持久化数据不应被 Adapter Shutdown 擦除）
+- `PlayerPrefsSaveModulePlayModeTests` (16 测试)
+
+### 迭代 9 — UGUIUIModule Adapter
+
+**Added**
+- `Runtime/Unity/UI/UGUIUIModule.cs`：IUIModule 的 Unity 实现，基于 UGUI Canvas
+- V0.5 最小版（不分层 / 不 Modal / 不传参，留给业务子类化扩展）
+- 单 Canvas root + GraphicRaycaster，Initialize 创建、Shutdown 销毁
+- `RegisterPrefab/UnregisterPrefab` API（不耦合 IResourceModule）
+- 委托 MemoryUIModule 做状态机，Adapter 只包裹 GameObject lifecycle
+- `virtual OnOpened/OnClosed` 钩子供业务子类化扩展
+- 加 "UnityEngine.UI" references
+- `UGUIUIModulePlayModeTests` (11 测试)
+
+### 迭代 10 — UnitySceneModule Adapter
+
+**Added**
+- `Runtime/Unity/Scene/UnitySceneModule.cs`：ISceneModule 的 Unity 实现，接 SceneManager
+- Load 同步（LoadScene Additive）、Unload 异步 fire-and-forget（UnloadSceneAsync）
+- 内部 List+HashSet 维护"已请求加载"状态，与 MemorySceneModule 契约一致
+- Shutdown 不卸载已加载场景（运行时资源持久化）
+- `UnitySceneModulePlayModeTests` (13 测试)
+
+### V0.5 Unity Adapter 套件总结
+5 个 Unity Adapter 全数落地（Audio / Input / Save / UI / Scene），合计 ~62 PlayMode 测试。
+Adapter 测试基建（Tests/PlayMode asmdef + InputSystem.TestFramework + UGUI）就位。
+
 ### V0.5 Gate 剩余项（待做）
-- [ ] UGUI Adapter（UnityUIModule）— Plan agent 推荐 Iter 8
-- [ ] UnitySceneModule Adapter（接 SceneManager.LoadSceneAsync）
-- [ ] PlayerPrefs Save Adapter
-- [ ] NetworkModule（IChannel + IMessageBus 接口 + Memory）
+- [ ] NetworkModule（IChannel + IMessageBus 接口）— Plan agent 建议与首个真实实现共生设计
 - [ ] Adapters/Mirror 默认实现
 - [ ] MemoryPack 序列化集成
-- [ ] HybridCLR IHotfixLoader
+- [ ] HybridCLR IHotfixLoader 接口 + 实现
+- [ ] YooAsset Adapter（包未装，物理阻塞）
 
 ---
 
