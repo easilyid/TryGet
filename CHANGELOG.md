@@ -2,6 +2,89 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.9 — IPlugin（hsenl 风格切面）+ IPureComponent（ECS 二级方案）
+
+> 原 V0.9 路线含 Source Generator，本 minor 拆分：V0.9 = 运行时（IPlugin + IPureComponent），V0.9.5 = Source Generator（独立 minor）。
+
+### 迭代 0 — V0.9 PRD
+
+**Added**
+- `docs/design/V0.9-plugin-pure-component.md`：4 维度跨框架调研（hsenl IPlug / ET Component / Fantasy / TEngine） + IPlugin / IPluginHost / IPlugPoint / IPureComponent / IComponentSystem 详细设计 + Iter 拆分 + 风险表
+- 本 PRD 文档化"V0.9 = 运行时部分"与"V0.9.5 = Source Generator"的拆分理由
+
+### 迭代 1 — IPlugin / IPluginHost / IPlugPoint + ModuleHost 集成
+
+**Added**
+- `Runtime/Core/Module/IPlugin.cs`：
+  - `IPlugin` 接口（`Install` / `Uninstall` + `Priority`）
+  - `IPluginHost` 接口（`AddPlugin` / `RemovePlugin` / `GetPlugin` / `GetPluginsAt` / `PluginCount`）
+  - `IPlugPoint` 标记接口
+- `Runtime/Core/Module/ModuleHostPlugPoints.cs`：内置插点 `IModuleHostBeforeUpdate` / `IModuleHostAfterUpdate`
+
+**Modified**
+- `Runtime/Core/Module/IModuleHost.cs`：现继承 `IPluginHost`（API 表面新增，向后兼容）
+- `Runtime/Core/Module/ModuleHost.cs`：
+  - 新增 `_pluginsByPoint` 存储（按 Priority 升序）
+  - `Update` 内调度顺序：BeforeUpdate plugins → IUpdateModule.Update → AfterUpdate plugins
+  - `Shutdown` 起首先 Uninstall 所有 plugin（每个 plugin 实例只 Uninstall 一次，不论挂多少插点）
+  - `AddPlugin` 失败回滚（Install 抛异常时移除注册）
+  - 实现 `IPluginHost` 全套方法
+
+**Tests** — `PluginTests.cs`（13 测试）
+- 注册/移除：`AddPlugin_TriggersInstall` / `AddPlugin_NullThrows` / `AddPlugin_SamePointSameType_Twice_Throws` / `AddPlugin_InstallThrows_NoResidue` / `RemovePlugin_TriggersUninstall` / `RemovePlugin_NotRegistered_ReturnsFalse`
+- Lookup：`GetPlugin_ReturnsRegisteredInstance` / `GetPlugin_NotRegistered_ReturnsNull` / `GetPluginsAt_EnumeratesAllPriorityOrder`
+- Update 内触发：`Update_BeforePluginsFireBeforeModules_AfterFireAfter`（demo `ModuleHostMetricsPlugin` 同实例挂 Before+After） / `Update_NoPlugins_ModuleUpdateStillRuns`
+- Shutdown：`Shutdown_UninstallsAllPluginsOncePerInstance` / `Shutdown_AfterRemove_NoCrash`
+- Priority：`Priority_AscendingOrder`
+
+**Notes**
+- 命名升级 vs hsenl：`IPlug`→`IPlugin`、`IPluggable`→`IPluginHost`、`IPlugGroup`→`IPlugPoint`、`Init/Dispose`→`Install/Uninstall`
+- TryGet 新加 `Priority` 字段（hsenl 无），与 Module 体系对齐
+- 与 `IModule` 概念分工：Module = 服务（`host.Get<T>()` 拉），Plugin = 横切关注点（hook 到 IPlugPoint，框架内部触发）
+
+### 迭代 2 — IPureComponent + IComponentSystem + EntityPureComponentExtensions + ADR-0017
+
+**Added**
+- `Runtime/Core/Entity/IPureComponent.cs`：
+  - `IPureComponent` 标记接口（marker only，无约束）
+  - `IComponentSystem<TComponent>` 外置 System 接口（`OnAttach` / `OnDetach`）
+- `Runtime/Core/Entity/EntityPureComponentExtensions.cs`：扩展方法（`AddComponent` / `GetComponent` / `HasComponent` / `RemoveComponent` / `ComponentCount`）
+- `docs/adr/0017-aspect-vs-pure-component-dual-path.md`：双轨决策 ADR
+
+**Modified**
+- `Runtime/Core/Entity/Entity.cs`：
+  - 新增 `_components` 字段（懒初始化 `Dictionary<Type, IPureComponent>`，未使用时不分配）
+  - 新增内部方法 `AddPureComponentInternal` / `TryGetPureComponentInternal` / `HasPureComponentInternal` / `RemovePureComponentInternal` / `PureComponentCountInternal`
+  - `MarkDestroyed` 增加 `_components?.Clear()`
+
+**Tests** — `PureComponentTests.cs`（16 测试）
+- Add：`AddComponent_StoresComponent` / `AddComponent_NullThrows` / `AddComponent_SameType_Twice_Throws` / `AddComponent_OnDestroyedEntity_Throws`
+- Get：`GetComponent_ReturnsStored` / `GetComponent_NotPresent_ClassReturnsNull` / `GetComponent_StructComponent_BoxingRoundtrip`
+- Has：`HasComponent_AfterAdd_True` / `HasComponent_NotPresent_False`
+- Remove：`RemoveComponent_Present_RemovesAndReturnsTrue` / `RemoveComponent_NotPresent_ReturnsFalse` / `RemoveComponent_OnDestroyedEntity_Throws`
+- 双轨独立：`PureComponent_AndAspect_AreIndependentChannels`
+- Destroy 清理：`Destroy_ClearsComponents`
+- IComponentSystem 业务显式调度 demo：`IComponentSystem_ExplicitDispatch_Demo`
+- 计数 + 懒分配：`ComponentCount_TracksAddAndRemove` / `NoAllocation_BeforeFirstAdd`
+
+**Notes**
+- **双轨并存**：Aspect（OO 风格，行为内嵌）与 IPureComponent（DOD 风格，行为外置到 IComponentSystem）完全独立——不共享存储、不共享 mask、不共享 Query 路径
+- **V0.9 不自动调度**：framework 不自动调 `IComponentSystem.OnAttach`，业务显式触发（V0.9.5 Source Gen 后引入自动调度）
+- **struct boxed 存储**：IPureComponent 是 marker interface，struct 走 `Dictionary<Type, IPureComponent>` 装箱；V0.9.5 评估泛型化
+- 选择矩阵见 ADR-0017 §"选择矩阵"
+
+### 迭代 3 — 路线图修订 + CHANGELOG + commit
+
+**Modified**
+- `docs/strategy/V2-roadmap-tasks.md`：V0.9 原 Epic 列表标 Done（IPlugin + IPureComponent），新增 V0.9.5 minor（Source Generator）的 7 Epic
+- `CHANGELOG.md`：本段
+
+**Notes**
+- V0.9 总测试数：29 新增（13 IPlugin + 16 IPureComponent），全套 Shadow csproj 0/0
+- V0.9 实际工作量 = 原 V0.9 路线图 60%（去掉 SourceGen 部分，留作 V0.9.5）；好处是 V0.9 可以独立发布且无外部依赖
+
+
+
 ## V0.8 — IKVStore / IConfigSource / IAssetSource / ISerializer 重构（完整落地）
 
 ### 迭代 0 — V0.8 PRD

@@ -114,28 +114,58 @@ Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 
 
 ---
 
-## 4. V0.9 — Source Generator + `IPlugin` 系统（Epic 级骨架）
+## 4. V0.9 — IPlugin（hsenl 风格切面）+ IPureComponent（ECS 二级方案）— **完整落地** ✓
+
+> 2026/05/24 修订：原 V0.9 路线含 Source Generator，拆分为 V0.9（运行时部分）+ V0.9.5（Source Generator 独立 minor）。
 
 ### 4.1 V0.9 总目标
 
-引入 Roslyn Source Generator 让 Module / System / EventHandler 自动注册，消除手动 `host.Register<>()` 调用；引入 `IPlugin` 切面机制（借鉴 hsenl Plug）。
+吸收 hsenl IPlug 设计落地 ModuleHost 横切关注点；引入 `IPureComponent` ECS 二级方案与 Aspect 双轨并存。
 
-### 4.2 V0.9 Epic 列表
+### 4.2 V0.9 Epic 列表（已全部完成）
+
+| Epic | 范围 | 状态 | 关键产物 |
+|---|---|---|---|
+| ~~**E1**~~ | ~~TryGet.SourceGenerator 独立 csproj 骨架~~ | **→ V0.9.5** | 转移 |
+| ~~**E2**~~ | ~~`[Module]` Attribute + AssemblyManifest.g.cs~~ | **→ V0.9.5** | 转移 |
+| ~~**E3**~~ | ~~`[SystemRegister]`~~ | **→ V0.9.5** | 转移 |
+| ~~**E4**~~ | ~~`[EventHandler]`~~ | **→ V0.9.5** | 转移 |
+| **E5** | `IPlugin / IPluginHost` 切面机制 | **Done** | `IPlugin.cs` + `ModuleHostPlugPoints.cs` + ModuleHost 集成 + 13 测试 |
+| **E6** | `IPureComponent`（ECS 二级方案）+ ADR-0017 | **Done** | `IPureComponent.cs` + `EntityPureComponentExtensions.cs` + ADR-0017 + 16 测试 |
+| **E7** | V0.9 测试 + CHANGELOG | **Done** | 29 新增测试 + CHANGELOG V0.9 段 + ARCHITECTURE V0.9 段 |
+
+### 4.3 V0.9 决策点结论
+
+- **E1-E4 → V0.9.5**：Source Generator 独立 csproj + Roslyn IIncrementalGenerator + Unity asmdef + 多 attribute 设计，工作量 ≈ V0.6 完整（11 Iter）。独立发布更稳。
+- **E5 IPlugin 先做**：不依赖 SourceGen，是 ModuleHost 切面机制的核心。命名升级 vs hsenl：`IPlug→IPlugin`、`IPluggable→IPluginHost`、`IPlugGroup→IPlugPoint`、`Init/Dispose→Install/Uninstall`；新增 `Priority` 字段与 Module 体系对齐。
+- **E6 IPureComponent 独立交付**：marker interface + 外置 IComponentSystem<T>，与 Aspect 双轨并存（ADR-0017）。V0.9 不自动调度（业务显式触发），自动调度留 V0.9.5。
+
+---
+
+## 4.5 V0.9.5 — Source Generator 注册（独立 minor，待启动）
+
+### 4.5.1 V0.9.5 总目标
+
+引入 Roslyn Source Generator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` 调用。
+
+### 4.5.2 V0.9.5 Epic 列表
 
 | Epic | 范围 | 关键产物 |
 |---|---|---|
 | **E1** | `TryGet.SourceGenerator` 独立 csproj 骨架 | Roslyn IIncrementalGenerator 项目；`dotnet build` 触发 Generator；最小 Hello World 生成 |
-| **E2** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | 自动扫描带 `[Module]` 的类，生成注册代码；Unity 端用 `RuntimeInitializeOnLoadMethod` + Net 端用 `ModuleInitializer` 双触发 |
-| **E3** | `[SystemRegister]` + 生成 System 注册 | 自动扫描 `SystemBase` 子类 + 注册到对应 `SystemGroup` + `Phase` |
-| **E4** | `[EventHandler]` + 生成 EventBus 订阅 | 编译期生成订阅代码，零反射 |
-| **E5** | `IPlugin / IPluginHost` 切面机制 | 借鉴 hsenl `IPlug`：Install / Uninstall / 顺序 / OnAttach / OnDetach |
-| **E6** | `IPureComponent`（ECS 二级方案）+ ADR-0017 | 写"为何 TryGet 与 ET 纯数据 Component 路线分歧"的 ADR；引入 `IPureComponent`（无方法）+ `IComponentSystem<T>` 扩展方法接口 |
-| **E7** | V0.9 测试 30+ + CHANGELOG | 自动 vs 手动注册等价性测试 |
+| **E2** | Unity asmdef 集成 + RoslynAnalyzer label | Unity 端用 `RuntimeInitializeOnLoadMethod` + Net 端用 `ModuleInitializer` 双触发 |
+| **E3** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | 自动扫描带 `[Module]` 的类，生成注册代码 |
+| **E4** | `[SystemRegister]` + 生成 System 注册 | 自动扫描 `SystemBase` 子类 + 注册到对应 `SystemGroup` + `Phase` |
+| **E5** | `[EventHandler]` + 生成 EventBus 订阅 | 编译期生成订阅代码，零反射 |
+| **E6** | `IComponentSystem<T>` 自动调度（V0.9 IPureComponent 配套） | 扫描 IComponentSystem 实现，生成 OnAttach/OnDetach 自动 hook 到 `Entity.AddComponent`/`RemoveComponent` |
+| **E7** | V0.9.5 测试 30+ + CHANGELOG | 自动 vs 手动注册等价性测试 |
 
-### 4.3 V0.9 决策点
+### 4.5.3 V0.9.5 决策点
 
-- E1-E4 与 E5 顺序：先做 SourceGen 还是先做 IPlugin？（推荐：先 SourceGen，IPlugin 是 SourceGen 的下游消费者）
-- E6 是否纳入 V0.9 vs 推迟到 V0.9.5？（推荐：纳入 V0.9，因为 IPureComponent 的注册也走 SourceGen）
+- 是否在生成代码中处理 IL2CPP AOT 限制？（推荐：是，生成代码避免反射 + Type.MakeGenericType）
+- IPureComponent 的 struct 类型化容器是否同步引入？（推荐：是，作为 E6 一并落地，消除 boxing）
+
+
 
 ---
 
@@ -188,7 +218,7 @@ Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 
 
 ### 7.2 跨 Iter / 跨 minor 的纪律
 
-- 每个 minor（V0.6 / V0.7 / V0.8 / V0.9 / V1.0）落地后打 git tag `v0.X.0`
+- 每个 minor（V0.6 / V0.7 / V0.8 / V0.9 / V0.9.5 / V1.0）落地后打 git tag `v0.X.0`
 - 每个 minor 落地后更新 `ARCHITECTURE.md` 的"V0.5 之后路线图"段
 - 每个新 ADR 写完后更新 `ARCHITECTURE.md` 的"核心设计决策（ADR 索引）"表
 - 任何对 Core 公开接口的破坏性变更必须先发 ADR
@@ -205,7 +235,7 @@ Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 
 | 4 | V0.6 第一刀位置：ITask vs Bootstrap | **ITask（致命缺口优先）** | V0.6/V0.7 顺序 |
 | 5 | Adapter 退场后的 `Samples/Unity/Adapters/` 迁移是否已 commit | （查 git）若否，需先补齐 ADR-0016 §3 实施时序 | 历史包袱 |
 | 6 | 是否引入 `IEventScope`（TEngine GameEventMgr 风格） | **V0.7 引入** | V0.7 范围 |
-| 7 | Source Generator 引入时机 | **V0.9** | V0.8 实施压力 |
+| 7 | Source Generator 引入时机 | **V0.9.5（独立 minor，2026/05/24 修订）** | V0.8 实施压力 |
 | 8 | 是否在 V0.6-V0.8 期间允许"用 UniTask 临时挡刀"（spike 验证）vs "纯自研到底" | **允许 spike，但 V0.6.0 release 前必须切回自研** | V0.6 工作量 |
 
 ---

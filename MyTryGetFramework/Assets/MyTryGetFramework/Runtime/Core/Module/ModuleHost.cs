@@ -30,6 +30,9 @@ namespace TryGet
         private readonly Dictionary<Type, IModule> _modulesByInterface = new Dictionary<Type, IModule>();
         private readonly IEventBus _eventBus = new WorldEventBus();
 
+        // V0.9 IPlugin 系统：插点 → 该插点上已注册的插件（按 Priority 升序）
+        private readonly Dictionary<Type, List<IPlugin>> _pluginsByPoint = new Dictionary<Type, List<IPlugin>>();
+
         // 拓扑排序后的初始化顺序，Shutdown 用它的逆序。
         private List<IModule> _initOrder;
 
@@ -148,17 +151,32 @@ namespace TryGet
 
         /// <summary>
         /// 帧 Update。按 OnInit 顺序调用所有 <see cref="IUpdateModule"/>。
+        /// V0.9 起：BeforeUpdate plugins → IUpdateModule.Update → AfterUpdate plugins。
         /// </summary>
         public void Update(float deltaTime, float unscaledDeltaTime)
         {
             if (!_initialized)
                 throw new InvalidOperationException("Update requires Initialize first.");
 
+            // V0.9: BeforeUpdate plugins
+            if (_pluginsByPoint.TryGetValue(typeof(IModuleHostBeforeUpdate), out var beforeList))
+            {
+                for (int i = 0; i < beforeList.Count; i++)
+                    ((IModuleHostBeforeUpdate)beforeList[i]).OnBeforeUpdate(this, deltaTime, unscaledDeltaTime);
+            }
+
             // 本地变量防御：Module.Update 中若调用 Shutdown 会把字段置 null
             var list = _updateModules;
             for (int i = 0; i < list.Count; i++)
             {
                 list[i].Update(deltaTime, unscaledDeltaTime);
+            }
+
+            // V0.9: AfterUpdate plugins
+            if (_pluginsByPoint.TryGetValue(typeof(IModuleHostAfterUpdate), out var afterList))
+            {
+                for (int i = 0; i < afterList.Count; i++)
+                    ((IModuleHostAfterUpdate)afterList[i]).OnAfterUpdate(this, deltaTime, unscaledDeltaTime);
             }
         }
 
@@ -180,11 +198,30 @@ namespace TryGet
         /// <summary>
         /// 按 Initialize 逆序 Shutdown 所有 Module。允许多次调用。
         /// 单 Module 抛异常不中断后续 Module Shutdown，最终聚合抛 <see cref="ModuleShutdownException"/>。
+        /// V0.9 起：Shutdown 开头先 Uninstall 所有 plugin（保证 plugin 不引用已 Shutdown 的 Module）。
         /// </summary>
         public void Shutdown()
         {
             if (!_initialized)
                 return;
+
+            // V0.9: 先 Uninstall 所有 plugin（每个 plugin 实例只 Uninstall 一次，不论挂多少插点）
+            if (_pluginsByPoint.Count > 0)
+            {
+                var uninstalled = new HashSet<IPlugin>();
+                foreach (var kv in _pluginsByPoint)
+                {
+                    foreach (var plugin in kv.Value)
+                    {
+                        if (uninstalled.Add(plugin))
+                        {
+                            try { plugin.Uninstall(this); }
+                            catch { /* 吞 Uninstall 异常，保证 Module Shutdown 仍进行 */ }
+                        }
+                    }
+                }
+                _pluginsByPoint.Clear();
+            }
 
             var shutdown = new HashSet<IModule>();
             List<Exception> failures = null;
@@ -304,6 +341,100 @@ namespace TryGet
             int p = a.Priority.CompareTo(b.Priority);
             if (p != 0) return p;
             return string.Compare(a.GetType().FullName, b.GetType().FullName, StringComparison.Ordinal);
+        }
+
+        #endregion
+
+        #region IPluginHost (V0.9)
+
+        public int PluginCount
+        {
+            get
+            {
+                int total = 0;
+                foreach (var kv in _pluginsByPoint) total += kv.Value.Count;
+                return total;
+            }
+        }
+
+        public void AddPlugin<TPoint, T>(T plugin)
+            where TPoint : IPlugPoint
+            where T : IPlugin, TPoint
+        {
+            if (plugin == null) throw new ArgumentNullException(nameof(plugin));
+
+            Type pointKey = typeof(TPoint);
+            if (!_pluginsByPoint.TryGetValue(pointKey, out var list))
+            {
+                list = new List<IPlugin>();
+                _pluginsByPoint[pointKey] = list;
+            }
+
+            // 不允许同 (point, pluginType) 重复注册（与 IModule.Register 语义一致）
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i].GetType() == typeof(T))
+                    throw new InvalidOperationException(
+                        $"Plugin of type {typeof(T).Name} already registered at point {pointKey.Name}.");
+            }
+
+            list.Add(plugin);
+            // 按 Priority 升序排（稳定排序保证同 Priority 按注册顺序）
+            list.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+
+            try { plugin.Install(this); }
+            catch
+            {
+                // 回滚注册
+                list.Remove(plugin);
+                if (list.Count == 0) _pluginsByPoint.Remove(pointKey);
+                throw;
+            }
+        }
+
+        public bool RemovePlugin<TPoint, T>()
+            where TPoint : IPlugPoint
+            where T : IPlugin, TPoint
+        {
+            Type pointKey = typeof(TPoint);
+            if (!_pluginsByPoint.TryGetValue(pointKey, out var list)) return false;
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i].GetType() == typeof(T))
+                {
+                    var plugin = list[i];
+                    list.RemoveAt(i);
+                    if (list.Count == 0) _pluginsByPoint.Remove(pointKey);
+
+                    try { plugin.Uninstall(this); }
+                    catch { /* 吞 Uninstall 异常，保证 RemovePlugin 调用方拿到 true */ }
+
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public T GetPlugin<TPoint, T>()
+            where TPoint : IPlugPoint
+            where T : class, IPlugin, TPoint
+        {
+            if (!_pluginsByPoint.TryGetValue(typeof(TPoint), out var list)) return null;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i].GetType() == typeof(T))
+                    return (T)list[i];
+            }
+            return null;
+        }
+
+        public IEnumerable<TPoint> GetPluginsAt<TPoint>() where TPoint : IPlugPoint
+        {
+            if (!_pluginsByPoint.TryGetValue(typeof(TPoint), out var list))
+                yield break;
+            for (int i = 0; i < list.Count; i++)
+                yield return (TPoint)(object)list[i];
         }
 
         #endregion

@@ -14,6 +14,10 @@ namespace TryGet
         private readonly Dictionary<Type, Aspect> _aspects = new Dictionary<Type, Aspect>();
         private readonly HashSet<Type> _tags = new HashSet<Type>();
 
+        // V0.9 IPureComponent 二级 ECS 通道（与 _aspects 完全独立，见 ADR-0017）。
+        // 懒初始化：未使用 PureComponent 的 Entity 不分配。
+        private Dictionary<Type, IPureComponent> _components;
+
         // V0.3：类型索引位掩码镜像。GetAspect 仍走 _aspects 取实例；
         // Query.Matches 走 mask 加速（O(1) 位运算替代 O(n) Dictionary 查找）。
         private BitArray256 _aspectMask;
@@ -185,6 +189,50 @@ namespace TryGet
 
         #endregion
 
+        #region IPureComponent (V0.9)
+
+        /// <summary>
+        /// 框架内部：Add PureComponent。供 <see cref="EntityPureComponentExtensions"/> 调用。
+        /// </summary>
+        internal void AddPureComponentInternal(Type type, IPureComponent component)
+        {
+            ThrowIfDestroyed();
+            if (_components == null)
+                _components = new Dictionary<Type, IPureComponent>();
+            if (_components.ContainsKey(type))
+                throw new InvalidOperationException($"Entity {_id} already has Component of type {type.Name}.");
+            _components[type] = component;
+        }
+
+        /// <summary>框架内部：TryGet PureComponent。</summary>
+        internal bool TryGetPureComponentInternal(Type type, out IPureComponent component)
+        {
+            if (_components == null)
+            {
+                component = null;
+                return false;
+            }
+            return _components.TryGetValue(type, out component);
+        }
+
+        /// <summary>框架内部：判断是否含 PureComponent。</summary>
+        internal bool HasPureComponentInternal(Type type)
+        {
+            return _components != null && _components.ContainsKey(type);
+        }
+
+        /// <summary>框架内部：移除 PureComponent。</summary>
+        internal bool RemovePureComponentInternal(Type type)
+        {
+            ThrowIfDestroyed();
+            return _components != null && _components.Remove(type);
+        }
+
+        /// <summary>框架内部：当前 PureComponent 数量。</summary>
+        internal int PureComponentCountInternal => _components?.Count ?? 0;
+
+        #endregion
+
         #region Tag
 
         /// <summary>
@@ -337,6 +385,7 @@ namespace TryGet
             _tags.Clear();
             _aspectMask.Clear();
             _tagMask.Clear();
+            _components?.Clear();
             _eventDispatcher.Clear();
 
             // 从父级移除

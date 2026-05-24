@@ -217,9 +217,30 @@ host.Shutdown();               // 逆序
 - **Shadow csproj 持续 0/0**；Samples/Net 无需改
 - **已知保留**：LubanConfigSource / YooAssetSource / PlayerPrefsKVStore production Adapter 留 V1.1+
 
-### V0.9 — Source Generator 注册
+### V0.9 — IPlugin（hsenl 风格切面）+ IPureComponent（ECS 二级方案）（**完整落地** — 3/3 Iter，待 tag v0.9.0）
+- **目标**：吸收 hsenl IPlug 设计落地横切关注点机制；引入 ECS 二级方案 IPureComponent（ET 风格 POCO + System 路线），与 Aspect 双轨并存
+- **关键决策**：
+  - 原 V0.9 路线含 Source Generator，本 minor 拆分：**V0.9 = 运行时（IPlugin + IPureComponent），V0.9.5 = Source Generator（独立 minor）**
+  - IPlugin 命名升级 vs hsenl：`IPlug→IPlugin`、`IPluggable→IPluginHost`、`IPlugGroup→IPlugPoint`、`Init/Dispose→Install/Uninstall`
+  - IPlugin 新加 `Priority` 字段（hsenl 无），与 Module 体系对齐
+  - **双轨 ECS**：保留 Aspect OO 风格，新增 IPureComponent DOD 风格，两条路线完全独立（不共享存储/mask/Query）。详见 ADR-0017
+  - V0.9 IComponentSystem **不自动调度**：业务显式调 `system.OnAttach(entity, component)`，自动调度留 V0.9.5 Source Gen
+- 文件：`Core/Module/IPlugin.cs` + `ModuleHostPlugPoints.cs`（IModuleHostBeforeUpdate / IModuleHostAfterUpdate）
+- 文件：`Core/Entity/IPureComponent.cs` + `EntityPureComponentExtensions.cs`
+- 文件修改：`IModuleHost.cs` 现继承 `IPluginHost` / `ModuleHost.cs` 加 _pluginsByPoint + Update 内 Before/After 触发 + Shutdown 起首先 Uninstall plugin / `Entity.cs` 加 _components 字段 + MarkDestroyed 清理
+- 文档：`docs/design/V0.9-plugin-pure-component.md`（PRD）+ `docs/adr/0017-aspect-vs-pure-component-dual-path.md`（双轨决策 ADR）
+- **Iter 0**（已落地）：V0.9 PRD（4 维度跨框架调研 + API 设计 + V0.9/V0.9.5 拆分理由）
+- **Iter 1**（已落地）：IPlugin + IPluginHost + IPlugPoint + ModuleHost 集成 + Demo `ModuleHostMetricsPlugin`
+- **Iter 2**（已落地）：IPureComponent + IComponentSystem + Entity 扩展 + ADR-0017
+- **Iter 3**（本 Iter）：CHANGELOG + ARCHITECTURE V0.9 段 + 路线图修订（SourceGen → V0.9.5）
+- **测试**：累计 29 EditMode 新增（13 IPlugin + 16 IPureComponent），全套 Shadow csproj 0/0
+- **API 表面新增**：`IModuleHost.AddPlugin/RemovePlugin/GetPlugin/GetPluginsAt/PluginCount`、Entity 扩展方法 `AddComponent/GetComponent/HasComponent/RemoveComponent/ComponentCount`
+- **已知保留**：IPureComponent 自动调度 / struct PureComponent 泛型化（去 boxing）/ PureComponent Query 支持留 V0.9.5+
+
+### V0.9.5 — Source Generator 注册（独立 minor，待启动）
 - 对标 Fantasy SourceGenerator + `[ModuleInitializer]` 自动注册
-- 消除手动 `host.Register<>()` 调用
+- 范围：独立 csproj + Unity RoslynAnalyzer label + IIncrementalGenerator 管线 + `[Module]` / `[SystemRegister]` / `[EventHandler]` Attribute + 自动生成 `IComponentSystem` 调度 hook
+- 工作量预估：≈ V0.6 完整（11 Iter），与 V0.9 拆开发布
 
 ### V1.0 — 真双端样例 + 文档冻结
 - `Samples/Net/MmoServerDemo` + `Samples/Unity/MmoClientDemo` 共享 Aspect/Entity 代码

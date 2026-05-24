@@ -11,8 +11,10 @@ namespace TryGet
     /// 3. 运行期：Module 内部通过 <see cref="Get{T}"/> 拉依赖，通过 <see cref="EventBus"/> 收发事件
     /// 4. 帧驱动：Update / LateUpdate（迭代 2 加入）
     /// 5. 关闭：<see cref="Shutdown"/> 按 OnInit 逆序执行
+    ///
+    /// V0.9 起继承 <see cref="IPluginHost"/>：host 直接可挂横切插件（<see cref="IPlugin"/>），无需 cast。
     /// </summary>
-    public interface IModuleHost
+    public interface IModuleHost : IPluginHost
     {
         /// <summary>
         /// 全局事件总线。所有 Module 共享，替代 V0.1 的 IWorldEventBus。
