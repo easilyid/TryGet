@@ -8,6 +8,7 @@ namespace TryGet
     ///
     /// 用途：测试、Headless 服务端、Luban Adapter 后端、运行期配置注入。
     /// </summary>
+    [System.Obsolete("Use MemoryConfigSource + ConfigLoader<T> (V0.8+). MemoryConfigModule will be removed in V0.9.")]
     public sealed class MemoryConfigModule : IConfigModule
     {
         private readonly Dictionary<string, object> _configs = new Dictionary<string, object>();

@@ -18,6 +18,9 @@ namespace TryGet
     /// 避免到处写 GetInt("flag") != 0）。不内置序列化复杂对象，业务自行 JSON / 二进制后
     /// 用 SetString 存。
     /// </summary>
+    [System.Obsolete("Use IKVStore (V0.8+). ISaveModule will be removed in V0.9. " +
+        "Migration: host.Register<IKVStore>(new MemoryKVStore()) — strongly typed Get<T>/Set<T>. " +
+        "For legacy bridging: host.Register<IKVStore>(new SaveModuleAdapter(existingSaveModule)).")]
     public interface ISaveModule : IModule
     {
         /// <summary>

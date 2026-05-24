@@ -6,6 +6,11 @@ namespace TryGet
     /// <summary>
     /// 本地化服务契约（V0.4 Common Module）。
     ///
+    /// **V0.8 评估**：保留现状不动。理由：
+    /// - 与 V0.8 重构的 4 个抽象（IKVStore / IConfigSource / IAssetSource / ISerializer）正交，无依赖耦合
+    /// - 已有 Memory 实现 + Unity 端 Adapter 候选清晰，重构收益低
+    /// - V0.9 引入 Source Generator 后再评估是否做 LocalizationKeys 编译期生成（强类型 key 避免漏译）
+    ///
     /// 设计原则：Core 层只提供 KV 翻译查询 + 语言切换，**不指定翻译表来源**
     /// （Excel / CSV / JSON / Google Sheets / 在线 CMS 都由 Adapter 解析后 RegisterTable）。
     ///

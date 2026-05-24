@@ -2,6 +2,105 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.8 — IKVStore / IConfigSource / IAssetSource / ISerializer 重构（完整落地）
+
+### 迭代 0 — V0.8 PRD
+
+**Added**
+- `docs/design/V0.8-kv-config-asset-serializer.md`：4 维度调研（ET/Fantasy/TEngine/MemoryPack/Luban）+ 4 抽象 API 详细设计 + Iter 拆分 + 破坏性变更清单
+
+**Notes**
+- 调研发现：MemoryPack 是 Unity 2026 最佳序列化方案（10-200x 其他，AOT-safe），但需 .NET 7+ / Unity 2022.3+
+- Fantasy 用 MemoryPack + ProtoBuf + BSON 三套；ET 用 MessagePack；TEngine 用 Luban
+- **关键决策**：Core 内**不提供 ISerializer 实现**（避免引入 NuGet 依赖），Memory* 实现绕过序列化直接持 object（zero-copy reference）
+
+### 迭代 1 — ISerializer 接口
+
+**Added**
+- `Runtime/Core/Common/ISerializer.cs`：接口（`IsSupported(Type)` / `Serialize<T>` / `Deserialize<T>` + 非泛型重载）
+- Tests `SerializerTests.cs` 内 `MockBytesSerializer`（仅 Tests 程序集，UTF8 string 序列化），7 测试
+
+**Notes**
+- Core 内**无具体实现** — 真实 MemoryPack / Json / MessagePack 实现由 V1.1+ Adapter 提供
+- 测试用 Mock 验证接口契约（IsSupported / Serialize / Deserialize 双向 / 不支持类型抛 / null data 抛）
+
+### 迭代 2 — IKVStore + MemoryKVStore + SaveModuleAdapter
+
+**Added**
+- `Runtime/Core/Common/IKVStore.cs`：强类型 `Get<T>` / `Set<T>` / `TryGet<T>` / `Remove` / `Clear` + `Keys` / `Count`
+- `Runtime/Core/Common/MemoryKVStore.cs`：Dictionary<string, object> 实现，绕过 ISerializer
+- `Runtime/Core/Common/SaveModuleAdapter.cs`：把 ISaveModule 弱类型四件套桥接为 IKVStore 强类型；string/int/float/bool 走对应 ISaveModule API，其他类型抛 NotSupportedException
+
+**Modified**
+- `Runtime/Core/Common/ISaveModule.cs`：加 `[Obsolete]`（V0.9 删）
+- `Runtime/Core/Common/MemorySaveModule.cs`：加 `[Obsolete]`
+
+**Tests** — `KVStoreTests.cs`（22 测试）
+- MemoryKVStore：Set/Get 多种类型（string/int/float/bool/自定义 struct/reference type）；TryGet 软失败；Get 硬失败抛；类型不匹配抛 InvalidCast；null reference 允许；空 key 抛；Remove / Clear / Keys / Count；ModuleHost 集成
+- SaveModuleAdapter：string/int/float/bool 桥接；unsupported type 抛 NotSupportedException；Keys/Count 视图；Remove 同步双端；null inner 抛
+
+### 迭代 3 — IConfigSource + ConfigLoader<T> + MemoryConfigSource
+
+**Added**
+- `Runtime/Core/Common/IConfigSource.cs`：无类型 byte[] 访问（`Has` / `GetRaw` / `TryGetRaw` / `ConfigIds` / `Count`）
+- `Runtime/Core/Common/ConfigLoader.cs`：`ConfigLoader<T>` 类型化包装 + 反序列化函数（业务注入 lambda）+ 缓存
+- `Runtime/Core/Common/MemoryConfigSource.cs`：Dictionary<string, byte[]> 实现 + `SetRaw` 注入
+
+**Modified**
+- `Runtime/Core/Common/IConfigModule.cs` / `MemoryConfigModule.cs`：加 `[Obsolete]`
+
+**Tests** — `ConfigSourceTests.cs`（17 测试）
+- MemoryConfigSource：SetRaw / GetRaw 往返；missing 抛 ConfigNotFoundException；TryGetRaw 软失败；null data 抛；Overwrite；ConfigIds 视图；Remove
+- ConfigLoader<T>：第一次 Get 反序列化；多次 Get 命中缓存（不重复反序列化）；same instance reference；missing 抛；TryGet 软失败；deserializer 抛异常 TryGet 返 false；InvalidateCache 全部 / 单个 id；null args 抛；ModuleHost 集成
+
+**Notes**
+- 设计对齐 Luban 真实工作流：IConfigSource 提供 byte[]，业务用 `new Tables(buf)` 类自我反序列化
+- 缓存语义：`Get(id)` 第一次反序列化并缓存；同 id 二次返回缓存 reference
+
+### 迭代 4 — IAssetSource (async, TGTask 集成) + MemoryAssetSource
+
+**Added**
+- `Runtime/Core/Common/IAssetSource.cs`：`LoadAsync<T>(path) : TGTask<T>`（V0.6 异步原语客户）+ `Get` / `TryGet` / `Unload` 同步路径
+- `Runtime/Core/Common/IAssetSource.cs` 内：`AssetNotFoundException`（V0.9 替代 `ResourceNotFoundException`）
+- `Runtime/Core/Common/MemoryAssetSource.cs`：Dictionary<string, object> + `TGTask<T>.FromResult/FromException` 即时返回
+
+**Modified**
+- `Runtime/Core/Common/IResourceModule.cs` / `MemoryResourceModule.cs`：加 `[Obsolete]`
+
+**Tests** — `AssetSourceTests.cs`（14 测试）
+- MemoryAssetSource：Add / Get / IsLoaded / TryGet 软失败 / Get 硬失败抛 AssetNotFoundException
+- LoadAsync 路径：Existing 立即完成 + 返回正确 instance；Missing 任务抛 AssetNotFoundException；Wrong type 抛 InvalidCast；空路径抛 ArgumentException
+- **`async TGTask Memory_LoadAsync_AwaitableInAsyncBody`** — 用 `await src.LoadAsync<T>(path)` 在 async TGTask 函数体内（验证 V0.6 TGTask 与 V0.8 IAssetSource 完整集成）
+- Unload；LoadedPaths 视图；ModuleHost 集成；Add null args 抛
+
+### 迭代 5 — Localization 评估 + CHANGELOG + ARCHITECTURE + commit
+
+**Modified**
+- `Runtime/Core/Common/ILocalizationModule.cs`：加 XML doc 段落 "V0.8 评估：保留现状不动；V0.9 Source Generator 引入后评估 LocalizationKeys 编译期生成"
+- `CHANGELOG.md`：本段
+- `Assets/MyTryGetFramework/ARCHITECTURE.md`：V0.8 完整段落
+
+**Notes — V0.8 完成认证**
+- 累计 6 Iter（0-5），覆盖 PRD → ISerializer → IKVStore → IConfigSource → IAssetSource → 收尾
+- Core 新增 8 个文件（IKVStore / MemoryKVStore / SaveModuleAdapter / IConfigSource / ConfigLoader / MemoryConfigSource / IAssetSource(+AssetNotFoundException) / MemoryAssetSource / ISerializer）
+- Core 修改 5 个文件（ILocalizationModule 注释 + 4 对 Obsolete 标记 ISaveModule/MemorySaveModule/IConfigModule/MemoryConfigModule/IResourceModule/MemoryResourceModule）
+- 测试累计 60 个新增（DoD #5 要求 25+ 已超额）：7 Serializer + 22 KVStore + 17 ConfigSource + 14 AssetSource
+- Shadow csproj 持续 0/0；Samples/Net 无需改
+
+**V0.8 DoD 状态**
+- ✓ #1 IKVStore 替代 ISaveModule（Obsolete + Adapter 完整）
+- ✓ #2 IConfigSource + ConfigLoader<T> 替代 IConfigModule（Obsolete 完整）
+- ✓ #3 IAssetSource + ISerializer 替代 IResourceModule（Obsolete + TGTask 集成完整）
+- ✓ #4 ILocalizationModule 评估：保留现状（理由文档化）
+- ✓ #5 测试 25+（超额到 60）+ CHANGELOG
+
+**已知保留**
+- ISerializer Core 无具体实现（V1.1+ Adapter 提供 MemoryPack/Json/MessagePack）
+- LubanConfigSource / YooAssetSource / PlayerPrefsKVStore 等 production Adapter 留 V1.1+
+- Tests 中现有 ISaveModule/IConfigModule/IResourceModule 测试（LogModuleTests 等同模式）继续工作但触发 Obsolete 警告（V0.9 删旧 API 时一并迁移）
+
+---
+
 ## V0.7 — Bootstrap + ILogger + IClock + IEventScope
 
 ### 迭代 0 — V0.7 PRD

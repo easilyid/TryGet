@@ -14,6 +14,9 @@ namespace TryGet
     /// 异步加载：V0.4 不在 Core 暴露 Task / UniTask（保持跨端干净）。
     /// 若需异步，由 Adapter 实现 IAsyncResourceModule（继承 IResourceModule + 加 Task<T> LoadAsync）。
     /// </summary>
+    [System.Obsolete("Use IAssetSource (V0.8+). IResourceModule will be removed in V0.9. " +
+        "Migration: host.Register<IAssetSource>(new MemoryAssetSource()); use LoadAsync<T>(path) for async support. " +
+        "ResourceNotFoundException → AssetNotFoundException.")]
     public interface IResourceModule : IModule
     {
         /// <summary>

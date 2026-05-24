@@ -14,6 +14,7 @@ namespace TryGet
     /// - Get 时 key 不存在或类型不匹配 → 返回 defaultValue（容错，不抛）
     /// - <see cref="Save"/> 为 no-op，数据仅存于进程内存，重启即丢
     /// </summary>
+    [System.Obsolete("Use MemoryKVStore (V0.8+). MemorySaveModule will be removed in V0.9.")]
     public sealed class MemorySaveModule : ISaveModule
     {
         // 单字典 object 装箱：保证 KeyCount 准确，且同 key 跨类型互斥（覆盖语义）

@@ -11,6 +11,7 @@ namespace TryGet
     ///
     /// 限制：Load 是同步的；不模拟"未加载"、"加载中"等真实异步状态。
     /// </summary>
+    [System.Obsolete("Use MemoryAssetSource (V0.8+). MemoryResourceModule will be removed in V0.9.")]
     public sealed class MemoryResourceModule : IResourceModule
     {
         private readonly Dictionary<string, object> _resources = new Dictionary<string, object>();

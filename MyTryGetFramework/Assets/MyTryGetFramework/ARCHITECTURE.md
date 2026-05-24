@@ -198,6 +198,25 @@ host.Shutdown();               // 逆序
 - `IConfigModule` → `IConfigSource + ConfigLoader<T>`（类型化配置表）
 - `ILocalizationModule` → 评估降级到 `Optional/`
 
+### V0.8 — IKVStore / IConfigSource / IAssetSource / ISerializer 重构（**完整落地** — 6/6 Iter，待 tag v0.8.0）
+- **目标**：把 V0.5 的 ISaveModule / IConfigModule / IResourceModule 重构为更通用的"数据源 + 类型化包装"抽象
+- **关键决策**：
+  - ISerializer Core **不提供实现**（避免 NuGet 依赖）；Memory* 实现绕过序列化直接持 object（zero-copy reference）
+  - IConfigSource + ConfigLoader<T> 拆分（对齐 Luban 真实工作流）
+  - IAssetSource.LoadAsync<T> 用 V0.6 TGTask（异步原语客户化）
+  - ILocalizationModule **保留不动**（V0.9 评估）
+- 文件：`Core/Common/`：ISerializer / IKVStore / MemoryKVStore / SaveModuleAdapter / IConfigSource / ConfigLoader / MemoryConfigSource / IAssetSource (+ AssetNotFoundException) / MemoryAssetSource（9 新文件）
+- 文件修改：ISaveModule / MemorySaveModule / IConfigModule / MemoryConfigModule / IResourceModule / MemoryResourceModule 加 [Obsolete] / ILocalizationModule 加评估注释
+- **Iter 0**（已落地）：PRD `docs/design/V0.8-kv-config-asset-serializer.md`（4 维度调研 + API 设计）
+- **Iter 1**（已落地）：ISerializer 接口 + MockBytesSerializer（仅 Tests）
+- **Iter 2**（已落地）：IKVStore + MemoryKVStore + SaveModuleAdapter + ISaveModule [Obsolete]
+- **Iter 3**（已落地）：IConfigSource + ConfigLoader<T> + MemoryConfigSource + IConfigModule [Obsolete]
+- **Iter 4**（已落地）：IAssetSource async（TGTask 集成）+ MemoryAssetSource + IResourceModule [Obsolete]
+- **Iter 5**（本 Iter）：Localization 评估 + CHANGELOG + ARCHITECTURE V0.8 段
+- **测试**：累计 60 EditMode 新增（DoD #5 25+ 已超额），含 1 个 async TGTask body 验证 IAssetSource + TGTask 完整集成
+- **Shadow csproj 持续 0/0**；Samples/Net 无需改
+- **已知保留**：LubanConfigSource / YooAssetSource / PlayerPrefsKVStore production Adapter 留 V1.1+
+
 ### V0.9 — Source Generator 注册
 - 对标 Fantasy SourceGenerator + `[ModuleInitializer]` 自动注册
 - 消除手动 `host.Register<>()` 调用

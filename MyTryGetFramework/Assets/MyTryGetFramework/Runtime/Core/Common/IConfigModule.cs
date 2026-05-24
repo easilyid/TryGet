@@ -21,6 +21,9 @@ namespace TryGet
     /// var sword = config.Get&lt;WeaponConfig&gt;("weapon.sword");
     /// </code>
     /// </summary>
+    [System.Obsolete("Use IConfigSource + ConfigLoader<T> (V0.8+). IConfigModule will be removed in V0.9. " +
+        "Migration: split raw byte[] storage (IConfigSource) from typed deserialization (ConfigLoader<T>) — " +
+        "aligns with Luban / Fantasy actual config workflow.")]
     public interface IConfigModule : IModule
     {
         /// <summary>
