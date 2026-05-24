@@ -24,9 +24,14 @@
 *.VC.db
 sysinfo.txt
 
-# Allow checked-in Shadow csproj + Net samples (dual-end builds)
+# Allow checked-in Shadow csproj + Net samples + Source Generator (dual-end builds)
 !ServerProject/**/*.csproj
 !Samples/**/*.csproj
+!Tools/**/*.csproj
+
+# Tools/ build outputs
+Tools/**/bin/
+Tools/**/obj/
 
 # Unity asset store tools
 [Aa]ssets/AssetStoreTools*

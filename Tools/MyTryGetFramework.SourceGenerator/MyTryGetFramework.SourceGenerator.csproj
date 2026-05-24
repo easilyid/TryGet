@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    V0.9.5 Source Generator csproj.
+
+    用途：编译期为 [Module] / [SystemRegister] / [EventHandler] / IComponentSystem<T> 等
+    业务标记生成自动注册代码。消除 V0.6-V0.9 累积的手动 host.Register<T>() 样板。
+
+    设计要点（详见 docs/design/V0.9.5-source-generator.md）：
+    - 用 IIncrementalGenerator（不是已 deprecated 的 ISourceGenerator）
+    - netstandard2.0 — Unity / Roslyn 4.0 标配
+    - 不引用 UnityEngine / Microsoft.Extensions.* — Generator 跑在 Roslyn host 内
+    - DLL 输出后手动 copy 到 MyTryGetFramework/Assets/MyTryGetFramework/Runtime/Core/Generators/
+      并加 Unity Inspector 上的 "RoslynAnalyzer" label（DLL.meta 中 PluginImporter）
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TryGet.SourceGenerator</RootNamespace>
+    <AssemblyName>MyTryGetFramework.SourceGenerator</AssemblyName>
+
+    <!-- Source Generator 是 build-only，不会出现在 consumer 的运行时依赖里 -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <IncludeSymbols>false</IncludeSymbols>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- 关掉 RS2008（"Enable analyzer release tracking"），analyzer release 表只在公开 nuget 包需要 -->
+    <NoWarn>RS2008</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!--
+    V0.9.5 Iter 2：build 完成后把 DLL 自动 copy 到 Unity Assets 内 Generators/ 目录。
+    这样 Unity Editor 重新 import 即可看到最新的 Generator；不需要手动 copy。
+    .meta 文件需要 commit 进 git（含 RoslynAnalyzer label）。
+  -->
+  <Target Name="CopyToUnityAssets" AfterTargets="Build">
+    <PropertyGroup>
+      <UnityGeneratorsDir>$(MSBuildProjectDirectory)\..\..\MyTryGetFramework\Assets\MyTryGetFramework\Runtime\Core\Generators</UnityGeneratorsDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(UnityGeneratorsDir)" />
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(UnityGeneratorsDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+</Project>

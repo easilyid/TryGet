@@ -33,4 +33,11 @@
     <Compile Include="..\..\MyTryGetFramework\Assets\MyTryGetFramework\Runtime\Core\**\*.cs" />
   </ItemGroup>
 
+  <!-- V0.9.5: 引用 Source Generator 作为 Analyzer，验证 IIncrementalGenerator 管线 -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\Tools\MyTryGetFramework.SourceGenerator\MyTryGetFramework.SourceGenerator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
 </Project>

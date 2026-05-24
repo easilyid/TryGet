@@ -42,6 +42,10 @@ namespace TryGet.Samples.Net
             var sched = host.Get<ITGTaskScheduler>();
             var proc = host.Get<IProcedureModule>();
 
+            // V0.9.5 Demo: IGreetingModule 由 [Module] 自动注册，业务无需 host.Register<>()。
+            var greeter = host.Get<IGreetingModule>();
+            log.Info(greeter.Greet("Samples/Net"));
+
             log.Info("=== MainAsync start ===");
 
             proc.Start("boot");

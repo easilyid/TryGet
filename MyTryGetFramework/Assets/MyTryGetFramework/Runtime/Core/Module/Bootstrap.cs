@@ -21,8 +21,10 @@ namespace TryGet
     {
         /// <summary>
         /// 创建 ModuleHost 并注册 Core 基础三件套（<see cref="ILogger"/> + <see cref="IClock"/> +
-        /// <see cref="ITGTaskScheduler"/>）。业务调用后可继续注册自己的 Module，最后调
-        /// <see cref="IModuleHost.Initialize"/>。
+        /// <see cref="ITGTaskScheduler"/>）。
+        /// V0.9.5 起：调用 <see cref="AssemblyManifestRegistry.ApplyAll"/> 应用所有 Source Generator
+        /// 自动生成的 Module 注册。业务调用后可继续手动 <see cref="IModuleHost.Register{T}"/> 自己的
+        /// Module，最后调 <see cref="IModuleHost.Initialize"/>。
         /// </summary>
         /// <param name="options">可选配置，允许业务注入自定义 Logger/Clock/Scheduler。</param>
         public static IModuleHost CreateHost(BootstrapOptions options = null)
@@ -33,6 +35,10 @@ namespace TryGet
             host.Register<ILogger>(options.Logger ?? new ConsoleLogger { MinimumLevel = options.MinimumLogLevel });
             host.Register<IClock>(options.Clock ?? new SystemClock());
             host.Register<ITGTaskScheduler>(options.Scheduler ?? new TGTaskScheduler());
+
+            // V0.9.5：应用 Source Generator 在 [ModuleInitializer] / [RuntimeInitializeOnLoadMethod]
+            // 阶段累计的 [Module] 自动注册委托
+            AssemblyManifestRegistry.ApplyAll(host);
 
             return host;
         }

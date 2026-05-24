@@ -237,10 +237,31 @@ host.Shutdown();               // 逆序
 - **API 表面新增**：`IModuleHost.AddPlugin/RemovePlugin/GetPlugin/GetPluginsAt/PluginCount`、Entity 扩展方法 `AddComponent/GetComponent/HasComponent/RemoveComponent/ComponentCount`
 - **已知保留**：IPureComponent 自动调度 / struct PureComponent 泛型化（去 boxing）/ PureComponent Query 支持留 V0.9.5+
 
-### V0.9.5 — Source Generator 注册（独立 minor，待启动）
-- 对标 Fantasy SourceGenerator + `[ModuleInitializer]` 自动注册
-- 范围：独立 csproj + Unity RoslynAnalyzer label + IIncrementalGenerator 管线 + `[Module]` / `[SystemRegister]` / `[EventHandler]` Attribute + 自动生成 `IComponentSystem` 调度 hook
-- 工作量预估：≈ V0.6 完整（11 Iter），与 V0.9 拆开发布
+### V0.9.5 — Source Generator 注册（**部分落地 — Iter 0-3 完成，Iter 4-7 待续**）
+- **目标**：引入 Roslyn IIncrementalGenerator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` 调用
+- **关键决策**：
+  - 使用 `IIncrementalGenerator`（不是 deprecated 的 `ISourceGenerator`）
+  - Generator 源码放仓库根 `Tools/MyTryGetFramework.SourceGenerator/`（与 Unity Assets 完全隔离）
+  - DLL 通过 csproj PostBuild target 自动 copy 到 `Assets/.../Runtime/Core/Generators/`
+  - netstandard2.0 + Microsoft.CodeAnalysis.CSharp 4.8.0
+  - Dual-trigger init：`[ModuleInitializer]`（.NET）+ `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` + `[Preserve]`（Unity / IL2CPP）
+  - Value-equatable record DTO（`ModuleInfo`）保证 Incremental pipeline 缓存命中
+- 文件：`Tools/MyTryGetFramework.SourceGenerator/`：csproj + `HelloWorldGenerator.cs` + `ModuleManifestGenerator.cs`
+- 文件：`Runtime/Core/Module/AssemblyManifestRegistry.cs` + `ModuleAttribute.cs`
+- 文件：`Assets/.../Runtime/Core/Generators/MyTryGetFramework.SourceGenerator.dll(.meta)` + `Generators.meta` folder asset
+- 文件修改：`Bootstrap.CreateHost` 加 `AssemblyManifestRegistry.ApplyAll(host)` 调用
+- 文件：`Samples/Net/SourceGenDemo.cs`（IGreetingModule + [Module] auto-register demo）+ Samples/Net.csproj 加 Analyzer 引用
+- **Iter 0**（已落地）：V0.9.5 PRD（6 维度调研 + API 设计 + Iter 拆分）
+- **Iter 1**（已落地）：Generator csproj 骨架 + HelloWorldGenerator 烟测
+- **Iter 2**（已落地）：Unity 集成（DLL copy + .meta RoslynAnalyzer label + 目录 .meta），Unity Editor 端验证留给用户
+- **Iter 3**（已落地）：[Module] Attribute + ModuleManifestGenerator + dual-trigger + Bootstrap 集成 + Samples/Net 端到端 demo
+- **Iter 4-7**（未落地，留待续）：
+  - Iter 4 [SystemRegister] Attribute
+  - Iter 5 [EventHandler] Attribute
+  - Iter 6 IComponentSystem 自动调度（V0.9 IPureComponent 配套）
+  - Iter 7 测试 30+ + CHANGELOG + ARCHITECTURE 整段收尾
+- **端到端验证（Net 端）**：`dotnet run Samples/Net` 输出 `[Info] Hello from V0.9.5 auto-registered Module, Samples/Net!`，业务 setup 内**没有任何 host.Register&lt;IGreetingModule&gt;(...)** 行
+- **Shadow csproj 持续 0/0**
 
 ### V1.0 — 真双端样例 + 文档冻结
 - `Samples/Net/MmoServerDemo` + `Samples/Unity/MmoClientDemo` 共享 Aspect/Entity 代码

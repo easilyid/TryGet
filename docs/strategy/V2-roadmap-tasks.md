@@ -142,28 +142,43 @@ Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 
 
 ---
 
-## 4.5 V0.9.5 — Source Generator 注册（独立 minor，待启动）
+## 4.5 V0.9.5 — Source Generator 注册（**部分落地 — Iter 0-3 完成**）
 
 ### 4.5.1 V0.9.5 总目标
 
-引入 Roslyn Source Generator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` 调用。
+引入 Roslyn IIncrementalGenerator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` 调用。
 
 ### 4.5.2 V0.9.5 Epic 列表
 
-| Epic | 范围 | 关键产物 |
-|---|---|---|
-| **E1** | `TryGet.SourceGenerator` 独立 csproj 骨架 | Roslyn IIncrementalGenerator 项目；`dotnet build` 触发 Generator；最小 Hello World 生成 |
-| **E2** | Unity asmdef 集成 + RoslynAnalyzer label | Unity 端用 `RuntimeInitializeOnLoadMethod` + Net 端用 `ModuleInitializer` 双触发 |
-| **E3** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | 自动扫描带 `[Module]` 的类，生成注册代码 |
-| **E4** | `[SystemRegister]` + 生成 System 注册 | 自动扫描 `SystemBase` 子类 + 注册到对应 `SystemGroup` + `Phase` |
-| **E5** | `[EventHandler]` + 生成 EventBus 订阅 | 编译期生成订阅代码，零反射 |
-| **E6** | `IComponentSystem<T>` 自动调度（V0.9 IPureComponent 配套） | 扫描 IComponentSystem 实现，生成 OnAttach/OnDetach 自动 hook 到 `Entity.AddComponent`/`RemoveComponent` |
-| **E7** | V0.9.5 测试 30+ + CHANGELOG | 自动 vs 手动注册等价性测试 |
+| Epic | 范围 | 状态 | 关键产物 |
+|---|---|---|---|
+| **E1** | `TryGet.SourceGenerator` 独立 csproj 骨架 | **Done (Iter 1)** | `Tools/MyTryGetFramework.SourceGenerator/` csproj + HelloWorldGenerator 烟测 |
+| **E2** | Unity asmdef 集成 + RoslynAnalyzer label | **Done (Iter 2)** | `Assets/.../Runtime/Core/Generators/` DLL + .meta with `RoslynAnalyzer` label，Unity Editor 端验证留给用户 |
+| **E3** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | **Done (Iter 3)** | `ModuleAttribute` + `AssemblyManifestRegistry` + `ModuleManifestGenerator` + Samples/Net 端到端 demo（dotnet run 通过） |
+| **E4** | `[SystemRegister]` + 生成 System 注册 | **Pending (Iter 4)** | SystemBase 子类自动注册到 SystemGroup |
+| **E5** | `[EventHandler]` + 生成 EventBus 订阅 | **Pending (Iter 5)** | 编译期生成 Subscribe，零反射 |
+| **E6** | `IComponentSystem<T>` 自动调度（V0.9 IPureComponent 配套） | **Pending (Iter 6)** | 扫 IComponentSystem 实现 + 生成 OnAttach/OnDetach 自动 hook |
+| **E7** | V0.9.5 测试 30+ + CHANGELOG | **Pending (Iter 7)** | 手动 vs 自动注册等价性测试 |
 
-### 4.5.3 V0.9.5 决策点
+### 4.5.3 V0.9.5 决策点结论
 
-- 是否在生成代码中处理 IL2CPP AOT 限制？（推荐：是，生成代码避免反射 + Type.MakeGenericType）
-- IPureComponent 的 struct 类型化容器是否同步引入？（推荐：是，作为 E6 一并落地，消除 boxing）
+- **`IIncrementalGenerator`（非 `ISourceGenerator`）**：2026 主流实践，Value-equatable DTO + ForAttributeWithMetadataName 入口高效
+- **Generator 在 repo root `Tools/` 下**：与 Unity Assets 完全隔离，PostBuild 自动 copy DLL 到 Unity
+- **Dual-trigger init**：.NET 端 `[ModuleInitializer]` + Unity 端 `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` + `[Preserve]` 防 IL2CPP strip
+- **AssemblyManifestRegistry 限制**：仅看到 `ApplyAll` 调用前已 static-init 的 assemblies；后加载 assembly 注册不回填已构造 host
+- **V0.9 IComponentSystem 自动调度**留 Iter 6（与 V0.9 PRD §"V0.9 不做的事"对齐）
+
+### 4.5.4 Iter 0-3 端到端验证证据
+
+`dotnet run Samples/Net` 输出（关键行）：
+
+```
+[Info] Hello from V0.9.5 auto-registered Module, Samples/Net!
+[Info] === MainAsync start ===
+...
+```
+
+业务 setup 内**没有任何 `host.Register<IGreetingModule>(...)`** 行 — 完全靠 `[Module(typeof(IGreetingModule))]` + Generator + dual-trigger init 自动完成。
 
 
 

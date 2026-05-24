@@ -2,6 +2,87 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+## V0.9.5 — Source Generator 注册（部分落地 — Iter 0-3 完成，Iter 4-7 待续）
+
+> 独立 minor。V0.9 PRD 拆分时确认：Source Generator 涉及独立 csproj + Unity asmdef + RoslynAnalyzer 集成 + 多 attribute + IIncrementalGenerator 管线，工作量 ≈ V0.6 完整（11 Iter）。本次落地 Iter 0-3（PRD + skeleton + Unity 集成 + [Module] auto-registration），Iter 4-7 留待续。
+
+### 迭代 0 — V0.9.5 PRD
+
+**Added**
+- `docs/design/V0.9.5-source-generator.md`：6 维度调研（IIncrementalGenerator vs ISourceGenerator / Unity 集成约定 / dual-trigger init 模式 / 参考实现对标含 TEngine GameEventGen, BigCat APT, GenEvent, Entitas / V0.6-V0.9 手动注册痛点回顾）+ 4 套 API（[Module] / [SystemRegister] / [EventHandler] / IComponentSystem 自动调度）详细设计 + 8 Iter 拆分 + 风险表
+
+**关键决策**
+- 使用 `IIncrementalGenerator`（不是已 deprecated 的 `ISourceGenerator`），匹配 2026 主流实践
+- Generator 源码放仓库根 `Tools/MyTryGetFramework.SourceGenerator/`，与 Unity Assets 完全隔离；DLL 通过 PostBuild target 自动 copy 到 `Assets/MyTryGetFramework/Runtime/Core/Generators/`
+- netstandard2.0 target + Microsoft.CodeAnalysis.CSharp 4.8.0（Unity 6 / Roslyn 4.0+ 标配）
+- Value-equatable record DTO（`ModuleInfo`）保证 Incremental pipeline 缓存命中
+- Dual-trigger init pattern：`[ModuleInitializer]`（C# 9+ .NET）+ `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` + `[Preserve]`（Unity IL2CPP）
+
+### 迭代 1 — Generator csproj 骨架 + Hello World
+
+**Added**
+- `Tools/MyTryGetFramework.SourceGenerator/MyTryGetFramework.SourceGenerator.csproj`：netstandard2.0 / `IsRoslynComponent=true` / `DevelopmentDependency=true` / PostBuild Copy 到 Unity Assets
+- `Tools/MyTryGetFramework.SourceGenerator/src/Generators/HelloWorldGenerator.cs`：烟测 Generator，用 `RegisterPostInitializationOutput` 生成 `__TryGetSourceGenerator_HelloWorld.g.cs`
+
+**Modified**
+- `ServerProject/MyTryGetFramework.Core/MyTryGetFramework.Core.csproj`：加 `<ProjectReference OutputItemType="Analyzer" />` 引用 Generator csproj
+- `.gitignore`：白名单 `Tools/**/*.csproj`，忽略 `Tools/**/bin/` + `Tools/**/obj/`
+
+**Notes**
+- 验证：`dotnet build -p:EmitCompilerGeneratedFiles=true` 后 `obj/generated/` 下能看到 `__TryGetSourceGenerator_HelloWorld.g.cs`
+- 烟测 Generator 不读取任何 attribute / 语法树，仅作管线启动验证
+
+### 迭代 2 — Unity 集成（DLL + RoslynAnalyzer label）
+
+**Added**
+- `Assets/MyTryGetFramework/Runtime/Core/Generators/` 目录（含 .meta folder asset）
+- `Assets/MyTryGetFramework/Runtime/Core/Generators/MyTryGetFramework.SourceGenerator.dll`（PostBuild 自动 copy）
+- `Assets/MyTryGetFramework/Runtime/Core/Generators/MyTryGetFramework.SourceGenerator.dll.meta`：PluginImporter 配置 + `labels: [RoslynAnalyzer]`（关键 Unity 集成 label）
+
+**Notes**
+- Unity 端验证留给用户在 Editor 中确认（DLL 显示 RoslynAnalyzer label + 生成代码在 Library/Bee/.../*.g.cs 中出现）
+- 命名空间隔离：Generator 不引用 `UnityEngine`（Generator 跑在 Roslyn host 内，无 Unity 上下文）；生成代码用 `#if UNITY_5_3_OR_NEWER` 条件包裹 Unity attribute
+
+### 迭代 3 — [Module] Attribute + AssemblyManifest 生成 + dual-trigger + Bootstrap 集成
+
+**Added**
+- `Runtime/Core/Module/AssemblyManifestRegistry.cs`：Generator 输出代码用的 runtime 收集器（`Register(Action<IModuleHost>)` / `ApplyAll(IModuleHost)` / `Count` / `ClearForTests`）
+- `Runtime/Core/Module/ModuleAttribute.cs`：业务用 `[Module(typeof(IService))]` 标记 Module 实现类
+- `Tools/MyTryGetFramework.SourceGenerator/src/Generators/ModuleManifestGenerator.cs`：扫 `[TryGet.Module]` 标记类，用 `ForAttributeWithMetadataName` 入口（O(1) attribute 查找）+ value-equatable `ModuleInfo` record，按 assembly 分组生成 `__AssemblyManifest_<asm>.g.cs`
+- `Samples/Net/SourceGenDemo.cs`：`IGreetingModule` + `[Module(typeof(IGreetingModule))] GreetingModule` 自动注册 demo
+
+**Modified**
+- `Runtime/Core/Module/Bootstrap.cs`：`CreateHost` 在注册 Core 基础三件套后调 `AssemblyManifestRegistry.ApplyAll(host)`
+- `Samples/Net/TryGet.Samples.Net.csproj`：加 `<ProjectReference OutputItemType="Analyzer" />` 让 Samples/Net 也享受 [Module] 自动注册
+- `Samples/Net/Program.cs`：`RunMainAsync` 内 `host.Get<IGreetingModule>()` 拉自动注册的 Module 并打印问候语
+
+**Notes**
+- 生成代码结构（实测从 Samples/Net 编译产物提取）：
+  ```csharp
+  internal static class __AssemblyManifest_TryGet_Samples_Net
+  {
+      private static bool _initialized;
+  #if UNITY_5_3_OR_NEWER
+      [global::UnityEngine.RuntimeInitializeOnLoadMethod(global::UnityEngine.RuntimeInitializeLoadType.BeforeSceneLoad)]
+      [global::UnityEngine.Scripting.Preserve]
+  #endif
+      [global::System.Runtime.CompilerServices.ModuleInitializer]
+      public static void Initialize() { /* dedup + AssemblyManifestRegistry.Register */ }
+  }
+  ```
+- **Net 端端到端验证通过**：`dotnet run` Samples/Net 看到 `[Info] Hello from V0.9.5 auto-registered Module, Samples/Net!`，业务 setup 内**没有任何 host.Register&lt;IGreetingModule&gt;(...)** 行
+- 同 [Module] 标 abstract / static 类时 Generator 静默忽略（不报错也不生成）
+- 业务 ServiceType 错误（class 不实现该接口）会在 user-code 编译期由 Roslyn 检测（生成代码 `new T()` cast 到 `host.Register<TService>` 失败）
+- **限制**：`AssemblyManifestRegistry.ApplyAll` 仅看到 ApplyAll 之前已 static-init 的 assemblies；后加载的 assembly 注册不会回填已构造 host
+
+### 后续 Iter（V0.9.5+，未落地）
+
+- **Iter 4** — `[SystemRegister(SystemGroup, Phase)]` Attribute + SystemBase 子类自动注册到对应 SystemGroup
+- **Iter 5** — `[EventHandler]` Attribute（标静态方法）+ 编译期生成 EventBus.Subscribe，零反射
+- **Iter 6** — `IComponentSystem<T>` 自动调度：扫实现类 + 生成 `ComponentSystemHooks<T>` 自动 hook 到 `Entity.AddComponent` / `RemoveComponent`（V0.9 IPureComponent 配套）
+- **Iter 7** — 手动 vs 自动注册等价性测试（30+）+ CHANGELOG + ARCHITECTURE 整段收尾
+
+
 ## V0.9 — IPlugin（hsenl 风格切面）+ IPureComponent（ECS 二级方案）
 
 > 原 V0.9 路线含 Source Generator，本 minor 拆分：V0.9 = 运行时（IPlugin + IPureComponent），V0.9.5 = Source Generator（独立 minor）。

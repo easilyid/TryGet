@@ -24,4 +24,11 @@
     <ProjectReference Include="..\..\ServerProject\MyTryGetFramework.Core\MyTryGetFramework.Core.csproj" />
   </ItemGroup>
 
+  <!-- V0.9.5: 引用 Source Generator 作为 Analyzer，让 Samples/Net 也享受 [Module] 自动注册 -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\Tools\MyTryGetFramework.SourceGenerator\MyTryGetFramework.SourceGenerator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
 </Project>
