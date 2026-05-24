@@ -3,7 +3,8 @@
     "rootNamespace": "TryGet.Unity",
     "references": [
         "MyTryGetFramework.Core",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
