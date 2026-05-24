@@ -1,8 +1,10 @@
 {
-    "name": "MyTryGetFramework.Unity",
+    "name": "MyTryGetFramework.Samples.UnityAdapters",
     "rootNamespace": "TryGet.Unity",
     "references": [
-        "MyTryGetFramework.Core"
+        "MyTryGetFramework.Core",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

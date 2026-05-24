@@ -1,0 +1,23 @@
+{
+    "name": "MyTryGetFramework.Samples.UnityAdapters.Tests.EditMode",
+    "rootNamespace": "TryGet.Tests",
+    "references": [
+        "MyTryGetFramework.Core",
+        "MyTryGetFramework.Samples.UnityAdapters"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

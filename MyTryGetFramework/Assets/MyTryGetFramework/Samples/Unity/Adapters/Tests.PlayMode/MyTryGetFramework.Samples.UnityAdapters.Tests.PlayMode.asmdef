@@ -1,9 +1,9 @@
 {
-    "name": "MyTryGetFramework.Tests.PlayMode",
+    "name": "MyTryGetFramework.Samples.UnityAdapters.Tests.PlayMode",
     "rootNamespace": "TryGet.Tests.PlayMode",
     "references": [
         "MyTryGetFramework.Core",
-        "MyTryGetFramework.Unity",
+        "MyTryGetFramework.Samples.UnityAdapters",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "Unity.InputSystem",
