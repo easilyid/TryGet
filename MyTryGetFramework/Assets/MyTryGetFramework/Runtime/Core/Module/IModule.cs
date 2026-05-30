@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace TryGet
 {
     /// <summary>
-    /// 引擎服务契约（ADR-0011）。一个 IModule 实例代表一个跨 Entity 的能力提供者。
+    /// 框架能力单元契约（ADR-0011）。一个 IModule 实例代表一个由 ModuleHost 托管的运行时能力。
     ///
     /// 纪律：
     /// - 每个 Module 必须先有 I{Name}Module 接口，再有实现

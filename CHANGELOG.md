@@ -2,6 +2,28 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
+> **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
+
+## V2.1 — EventBus 零 GC 派发 + 生命周期策略
+
+> 2026/05/30 基于第二轮 AlicizaX / AmaniDawn·DGame 源码复核，吸收重入安全延迟增删模式，修正当前 `Publish` 每次 `ToArray()` 分配的问题，并补上参考框架都缺失的 handler 异常隔离。
+
+### Changed
+
+- **EventBus Publish**：从 `list.ToArray()` 快照派发改为内部 handler 表 + pending add/remove；稳态 `Publish` 不再分配 snapshot 数组。
+- **派发中增删语义**：保持 V2.0 行为，`Subscribe` / `Unsubscribe` during dispatch 只影响下一次 `Publish`。
+- **handler 异常策略**：从 fail-fast 改为隔离；单个 handler 抛异常不阻断后续 handler，异常记录在 internal 诊断中供测试/后续诊断使用。
+- **EventScope 边界测试**：补充已 Dispose scope 下订阅不残留 handler 的用例，继续保持 owner 显式 Dispose。
+- **EventHandlerRegistry 行为锁定**：补充 legacy duplicate registration 与 `ApplyAll` fail-fast 的测试。
+
+### Verification
+
+- Shadow csproj：`dotnet build ServerProject/MyTryGetFramework.Core/MyTryGetFramework.Core.csproj` 通过，0 warning / 0 error。
+- 生成的测试 csproj：`dotnet build MyTryGetFramework.Tests.csproj` 通过，0 warning / 0 error；`dotnet test ...` 在该 Unity 生成 csproj 下未发现可执行测试（无输出/0 测试），不等价于 Unity EditMode 运行。
+- Unity EditMode 测试：需 Unity Editor 验证（本环境无法确认）。
+
+---
+
 ## V2.0 — 路线 C 重定向：纯客户端服务框架 + Procedure Stack
 
 > 2026/05/26 架构重定向（ADR-0020）：基于 TEngine/BigCat/hsenl/Fantasy 四框架对比分析，

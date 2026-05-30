@@ -232,5 +232,24 @@ namespace TryGet.Tests
 
             host.Shutdown();
         }
+
+        [Test]
+        public void SubscribeWithDisposedScope_DoesNotLeaveHandler()
+        {
+            var host = new ModuleHost();
+            host.Initialize();
+
+            int callCount = 0;
+            var scope = host.EventBus.CreateScope();
+            scope.Dispose();
+
+            host.EventBus.Subscribe<TestEvent>(_ => callCount++, scope);
+            host.EventBus.Publish(new TestEvent());
+
+            Assert.AreEqual(0, callCount, "已 Dispose 的 scope 下订阅不应残留 handler");
+            Assert.AreEqual(0, host.EventBus.GetSubscriberCount<TestEvent>());
+
+            host.Shutdown();
+        }
     }
 }

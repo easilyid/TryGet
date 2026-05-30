@@ -7,12 +7,12 @@ namespace TryGet
     /// 时钟服务契约（V0.7 起新增）。
     ///
     /// 暴露当前帧 dt + 累计时长 + 帧计数三件套，让 Module 业务无需直接读 <c>UnityEngine.Time</c>。
-    /// Net 端由 <see cref="SystemClock"/> 通过 <see cref="IUpdateModule.Update"/> 注入 dt；
+    /// Headless 环境由 <see cref="SystemClock"/> 通过 <see cref="IUpdateModule.Update"/> 注入 dt；
     /// Unity 端可由后续 Unity Adapter 读 <c>Time.deltaTime</c> 实现。
     ///
     /// **不暴露 wall-clock**（<c>DateTime.UtcNow</c> / <c>Stopwatch.GetTimestamp</c>）：
-    /// - Net 端服务器和 Unity 端客户端的 wall-clock 概念不同（时区 / 同步源 / NTP）
-    /// - 真需要 wall-clock 时由 V0.8+ Network 层引入独立 <c>IWallClock</c>
+    /// - 客户端与服务端的 wall-clock 概念不同（时区 / 同步源 / NTP）
+    /// - 真需要 wall-clock 时由独立时间同步模块提供
     /// - 这里 <see cref="ElapsedTime"/> 是"自 Host Initialize 起累计 dt"的 game time，与 wall-clock 解耦
     ///
     /// **不替换 <see cref="IUpdateModule.Update"/> 参数**：

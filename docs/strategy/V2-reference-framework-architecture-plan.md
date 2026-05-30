@@ -380,6 +380,62 @@ DGame 对 TryGet 的价值主要是商业客户端模块样板，而不是 Core 
 
 ---
 
+## 6bis. 第二轮参考框架分析（AlicizaX / AmaniDawn·DGame 源码复核，2026/05/30）
+
+> 本轮按 §11 模板，对 `ReferenceFramework/AlicizaX/`（UPM 包体系）与 `ReferenceFramework/DGame/`（AmaniDawn/DGame，对 §6 旧结论做源码级复核）做只读分析。
+> 澄清：用户给的 `github.com/Dgame/Dgame` 经核实是 D 语言 2D 图形框架（SDL/OpenGL，2019 归档，非 Unity/非 C#），与 TryGet 无关，已排除；§6 与本节的 Unity「DGame」均指 `AmaniDawn/DGame`。
+
+### 6bis.1 基本信息
+
+| 项 | AlicizaX | AmaniDawn/DGame |
+|---|---|---|
+| 框架名称 | Aliciza X Framework（com.alicizax.unity.*） | DGame |
+| 源码路径 | `ReferenceFramework/AlicizaX/com.alicizax.unity.framework`（286 cs，核心）+ `SourceGenerateTools` + 7 个扩展包 | `ReferenceFramework/DGame/GameUnity/Assets/DGame/Runtime`（734 cs） |
+| 定位 | 纯 Unity 客户端框架（UPM 包形态） | 基于 TEngine 的纯 Unity 客户端扩展框架 |
+| 是否依赖 Unity | 是（Mono\* 驱动层 + Cysharp.Text/UniTask 依赖） | 是（TEngine 系，强绑 YooAsset/HybridCLR） |
+| ECS / Entity | 无 | 无 |
+| 服务端 / 网络 | 无 | 无 |
+| 热更 / 资源工具链 | UI/资源 SourceGen | YooAsset / HybridCLR / Luban |
+
+### 6bis.2 AlicizaX 关键源码证据与设计思想
+
+AlicizaX 核心是 `Runtime/ABase/Service/Core/` 的一套 **三层作用域 Service Locator**：
+
+- **作用域分层 + 就近遮蔽**：`ServiceWorld` 固定 3 槽 `App(-10000)/Scene(-5000)/Gameplay(0)`（`AppScope.cs:30-35`、`ServiceWorld.cs:9-11`）；同一契约可在不同 scope 注册不同实现，`ContractBindings.TryGetBest` 解析时按 `Gameplay→Scene→App` 返回最具体绑定（`ServiceWorld.cs:236-258`）；`Scene/Gameplay` 可 `Ensure` 懒创建、可整体 `Dispose`（活动 scope 逆序销毁，`ServiceWorld.cs:122-132`、`ServiceScope.cs:152-176`）。
+- **重入安全延迟增删**：tick 迭代期间置 `_isIterating`，期间 Register/Unregister 入 `_pendingChanges` 队列，迭代结束 `FlushPendingChanges` 统一应用（`ServiceScope.cs:78-90,116-150,403-429`）——稳态零分配。
+- **索引化 swap-remove**：每服务缓存其在各相 tick 列表中的下标，注销时末尾搬移 + 回写索引，O(1) 注销、稳态零 GC（`ServiceScope.cs:296-401,498-518`）。
+- **四相 tick 能力接口** `IServiceTickable/LateTickable/FixedTickable/GizmoDrawable`（`IServiceTicks.cs`）+ `IServiceOrder` 手动 int 排序，由 `AppServiceRoot`(MonoBehaviour) 驱动。
+- **SourceGen 诊断友好**：`UIMetaSourceGenerator` 对未具体化的开放泛型 `ReportDiagnostic(UI002,Error,带 Location)`（`UIMetaSourceGenerator.cs:44-58`）；`UIResRegistryGenerator` 生成 UI 资源注册表。`EventSourceGenerator` 实为 `[Prewarm(N)]` 容量预热表（非 handler 订阅）。
+- **GameObjectPool 诊断**：`GameObjectPoolSnapshot` 含 acquire/release/hit/miss/peak/容量 + `generation-token` 三重校验（handle 引用 + generation + state）杜绝重复释放/陈旧句柄（`RuntimePoolModels.cs:438-579,890-927`）。
+
+**无 DependsOn 拓扑排序**：AlicizaX Init 在 Register 时立即触发、依赖靠 `Require<T>` 惰性解析——这点 **TryGet ModuleHost 的拓扑序 + 循环检测 + 失败回滚反而更强，吸收时不得回退**。
+
+### 6bis.3 DGame 复核（修正 §6 旧结论）
+
+- **修正 D1**：模块 tick 真实走 `RootModule(MonoBehaviour).Update → ModuleSystem.Update`（单相位，`RootModule.cs:248-262`）；`MonoDriver` 不是模块驱动器，只是给任意代码挂 Unity 生命周期/协程的事件中枢（`MonoDriver.cs:124-177`）。§6 把两者混为一谈，特此更正。
+- **细化 D2**：`GameTimer` 坏帧追赶上限 `m_maxBadFrameCheckCnt=10` 是**所有 loop timer 共享的全局节点访问预算**（`GameTimerModule.cs:16,60-160`），粗粒度且不可配——TryGet 应改为每定时器可配 `maxCatchUp`，不照搬全局预算。catch-up 逻辑是纯 C#、可 dotnet 验证（`GameTimerModule.cs:1-2`，无 UnityEngine）。
+- **坐实红线**：`ModuleSystem` 是 `public static class` + 反射按命名实例化（`ModuleSystem.cs:9,71-73`）；`GameEvent` 是 `StringId.StringToHash → int eventId` 弱类型派发（`GameEvent.cs:159-166`、`StringId.cs:17-28`）。
+- **次级发现**：`EventDelegateData` 用 `m_isExecute + addList/removeList` 延迟增删实现重入安全、无 ToArray 拷贝（`EventDelegateData.cs:20-57,82-97`），但 **handler 抛异常会中断循环 → CheckDataDirty 不执行 → 延迟队列永不 flush**。与 AlicizaX 的 PendingChange 模式**互相印证**同一思路，但两者都缺异常隔离。
+
+### 6bis.4 可吸收点（汇入候选）
+
+| 设计点 | 来源（双印证标注） | 符合 ADR-0020 | 映射候选 |
+|---|---|---|---|
+| EventBus 重入安全延迟增删 + 零 GC 派发 | AlicizaX PendingChange + DGame EventDelegateData（双印证） | ✓ 纯 C# 可验证 | **C2**（强化） |
+| SourceGen 诊断友好（ReportDiagnostic 替代静默 return null） | AlicizaX UIMetaSourceGenerator | ✓ tooling 可验证 | **C5**（强化） |
+| Timer 有界坏帧追赶（每定时器可配 maxCatchUp） | DGame GameTimer（改进其全局预算缺陷） | ✓ 纯 C# 可验证 | **C7（新增）** |
+| 服务作用域分层（App/Scene/Gameplay + 就近遮蔽 + scope 级 Dispose） | AlicizaX ServiceWorld | ✓ 主体纯 C# | **C8（新增，架构级，需先决策）** |
+| 对象池诊断快照 + generation-token 重复释放检测 | AlicizaX + DGame（双印证） | ✓ 纯 C# 可验证 | **C9（新增，低优先）** |
+| 索引化 swap-remove（O(1) 注销，稳态零 GC） | AlicizaX ServiceScope | ✓ 纯 C# 可验证 | C2/C3 实现技巧 |
+
+### 6bis.5 不吸收点（红线）
+
+- AlicizaX：`RootModule/AppServiceRoot/MonoServiceBehaviour`（MonoBehaviour）、`AppServices` 静态全局单例、`Cysharp.Text`(ZString) 依赖、GameObjectPool 强绑 Unity——只取纯 C# 的 `ServiceScope/ServiceWorld` 机制，Mono 驱动与第三方依赖挡在 Adapter 层外。
+- AlicizaX `Register<TContract,TExtraContract>` 多契约绑定——超出 ADR-0020 最小化范围，不引入。
+- DGame：静态全局 `ModuleSystem` + 反射按命名注册、弱类型 `int eventId` 派发、`Fsm` 强绑 `Animator/Playable`、`CreateSystemTimer` 用 `System.Timers.Timer` 线程池回调（非帧安全）——全部红线。
+
+---
+
 ## 7. 当前 TryGet Core 摩擦
 
 ### 7.1 FrameLoop Interface 还不够 deep
@@ -484,7 +540,9 @@ DGame 对 TryGet 的价值主要是商业客户端模块样板，而不是 Core 
 
 ### Candidate 2 — EventBus Lifecycle Policy
 
-**来源参考**：TEngine GameEvent owner-clear，hsenl EventSystem 注册目录。
+**设计文档**：`docs/design/V2.1-eventbus-zero-gc-lifecycle.md`（Implemented，2026/05/30 核心最小闭环；Shadow csproj + tests csproj build 通过，Unity EditMode 运行待 Editor 验证）。
+
+**来源参考**：TEngine GameEvent owner-clear，hsenl EventSystem 注册目录；第二轮强化吸收 AlicizaX PendingChange / DGame EventDelegateData 的重入安全延迟增删，并补上两者缺失的 handler 异常隔离。
 
 **必要性**：
 
@@ -650,30 +708,164 @@ Procedure Stack 适合游戏状态和 UI 叠层，但启动链、登录链、资
 
 ---
 
+### Candidate 7 — Timer Catch-up Policy（坏帧有界追赶）
+
+**来源参考**：DGame GameTimer 坏帧追赶（修正其全局预算缺陷）。
+
+**必要性**：
+
+TryGet 当前 `TimerModule` 的 repeating timer 在长帧后**直接合并丢弃漏拍**（`TimerModule.cs:179-196`：到期后 `RemainingSeconds=Interval` 重置只 Invoke 一次）。对依赖固定节拍的逻辑（技能 CD、buff tick、动画节拍）会丢拍。DGame 提供了另一极端（有界补偿），但其上限是所有 loop timer **共享的全局节点访问预算（硬编码 10）**，定时器多时几乎分不到补偿次数，行为难以推理。
+
+**范围**：
+
+- 给 repeating timer 增加 `catch-up` 策略：`Coalesce`（默认，当前行为：合并丢拍）vs `CatchUp`（补偿漏拍）二选一。
+- `CatchUp` 模式下每定时器可配 `maxCatchUp` 次数上限（**非** DGame 的全局共享预算），超限丢弃剩余并可选 Warning。
+- 纯 Core 算术（基于注入的 dt / IClock），不引入 `System.Timers.Timer` 线程池旁路。
+- 评估是否与 Candidate 3 Phase-aware Scheduler 的 `Delay(scaled/unscaled)` 协同。
+
+**预期收益**：
+
+- 固定节拍逻辑不丢拍，行为可预测（每定时器独立预算）。
+- 修正了 DGame 全局预算的设计缺陷。
+
+**验证标准**：
+
+- 长帧（dt 远大于 interval）下 `CatchUp` 触发预期次数、`Coalesce` 只触发一次。
+- `maxCatchUp` 上限生效、超限不无限补偿。
+- Core 不引用 UnityEngine。
+
+**优先级**：P2（可与 C3 一并做，或并入 TimerModule 增强）。
+
+---
+
+### Candidate 8 — Service Scope Layering（服务作用域分层）
+
+**来源参考**：AlicizaX ServiceWorld（App/Scene/Gameplay 三层 + 就近遮蔽 + scope 级 Dispose）。
+
+> ⚠️ **架构级候选，需先决策**：本候选与 ADR-0020「ModuleHost 单一全局容器」定位存在张力。引入前必须先确认是否允许子容器/分层生命周期，否则属架构扩张而非最小改动。建议**等 V2.3 UI / V2.5 场景真实需求出现后**再评估，而非现在投机引入。
+
+**必要性**：
+
+TryGet 当前 `ModuleHost` 是单一全局容器，所有 Module 同生命周期。但 UI（V2.3）/ 场景（V2.5）有真实的**作用域生命周期**需求：进入某场景时注册一批场景级服务，离开时整批释放；切换场景时这些服务应自动 Dispose 而非常驻。AlicizaX 用 App/Scene/Gameplay 三层 scope + 就近遮蔽（窄作用域覆盖宽作用域）+ scope 级逆序 Dispose 干净地表达了这一需求。
+
+**范围**（若决策通过）：
+
+- 在 ModuleHost 之上或之内引入有限层级的 scope（如 App 常驻 + Scene 可创建销毁），**不做任意嵌套**。
+- 服务解析就近遮蔽：窄 scope 命中优先。
+- scope 级生命周期：scope Dispose 时逆序 Shutdown 其内服务。
+- 保留现有 DependsOn 拓扑排序（**不得削弱**，AlicizaX 无拓扑是其短板）。
+- 不引入 AlicizaX 的静态全局 `AppServices` 单例与 Mono 驱动，保持显式 host 注入。
+
+**预期收益**：
+
+- 场景/UI 服务生命周期清晰，切场景自动释放。
+- ModuleHost Interface 更 deep（承载分层而非让业务自管）。
+
+**验证标准**：
+
+- scope 内注册/解析/就近遮蔽测试。
+- scope Dispose 逆序销毁测试。
+- 拓扑排序与循环检测在分层下仍生效。
+- Core 不引用 UnityEngine。
+
+**优先级**：P2-P3（**前置决策门**：先定 ADR 是否允许分层容器；不通过则不做）。
+
+---
+
+### Candidate 9 — Pool / Timer Diagnostics（池与定时器诊断快照）
+
+**来源参考**：AlicizaX GameObjectPool 诊断 + generation-token；DGame MemoryCollector / GameObjectPool（双印证）。
+
+**必要性**：
+
+TryGet `IObjectPool` 仅暴露 `IdleCount`（`IObjectPool.cs:22-25`），重复 Return 是未定义行为（注释把双释放检测推迟到 V0.3+ 可选 DEBUG）。出现真实泄漏/性能诊断需求时缺可观测性。AlicizaX 与 DGame 都提供了成体系的诊断快照（命中/未命中/峰值/容量）+ 重复释放检测；AlicizaX 的 `generation-token`（回收时三重校验 token+state）是比 HashSet Contains 更规范的双释放检测方案。
+
+**范围**：
+
+- `IObjectPool`/`IPoolModule` 增加只读诊断快照（acquire/release/hit/miss/peak/容量/idle），调用方传数组零分配填充。
+- 可选 generation-token 重复释放检测（纯整数 generation 计数，无 Unity 依赖）。
+- 不引入 AlicizaX 的分页 slot / maintenance 堆 / Unity GameObjectPool（强绑 Unity，属 Adapter）。
+- 注意：DGame `MemoryCollector.ReleaseCount--` 疑似符号 bug，勿照抄。
+
+**预期收益**：
+
+- 池可观测，便于定位泄漏与命中率问题。
+- 重复释放从「未定义行为」变为「可检测」。
+
+**验证标准**：
+
+- 诊断计数快照准确（spawn/release/hit/miss）。
+- 重复 Return 被 token 检测拒绝。
+- Core 不引用 UnityEngine。
+
+**优先级**：P3（仅在真实诊断需求出现后引入）。
+
+---
+
+### Candidate 10 — SourceGen Diagnostics（生成器诊断友好）
+
+**来源参考**：AlicizaX UIMetaSourceGenerator 的 `ReportDiagnostic`。
+
+> 与 Candidate 5（Generated Registry Diagnostics，运行时注册表诊断）互补：C5 是运行时可查询注册项，本候选是**编译期**对非法输入报错。
+
+**必要性**：
+
+TryGet 的 `EventHandlerGenerator`/`ModuleManifestGenerator` 对非法输入（非 static、签名不符、未实现接口）一律 `return null` **静默丢弃**（`EventHandlerGenerator.cs:43-49`），开发者写错 `[Module]`/`[EventHandler]` 时**无任何编译期反馈**，只能在运行时发现「没注册上」。AlicizaX 对开放泛型等非法输入 `ReportDiagnostic(带 Location)`，IDE 直接红线提示。
+
+**范围**：
+
+- 给两个 Generator 对非法输入 `ReportDiagnostic`（带 Location，分配诊断 ID 如 TG001/TG002）替代静默 return null。
+- 覆盖：`[Module]` 标在非 IModule 类、`[EventHandler]` 方法签名不符、标在非 static 等。
+- 纯 tooling（Roslyn GeneratorDriver + Diagnostics 断言可验证），不进 Core。
+
+**预期收益**：
+
+- 自动注册不再是黑盒，写错即时报错。
+- 降低「以为注册了其实没注册」的排查成本。
+
+**验证标准**：
+
+- 非法输入触发预期诊断 ID + Location。
+- 合法输入无误报。
+- GeneratorDriver 单测覆盖。
+
+**优先级**：P2（投入小、收益直接）。
+
+---
+
 ## 9. 推荐迭代顺序
 
 推荐顺序：
 
-1. **P0 — FrameLoop Module**  
-   先建立底层时序语言，为后续所有 Module 提供统一 phase。
+1. **P0 — FrameLoop Module** ✅ **已落地（2026/05/30, 0bfc33f）**
+   底层时序语言已建立，ModuleHost 5 阶段派发 + 执行表分桶完成。
 
-2. **P1 — EventBus Lifecycle Policy**  
-   提前解决订阅生命周期，避免 UI / Procedure 后续泄漏。
+2. **P1 — EventBus Lifecycle Policy + 零 GC（Candidate 2，强化）**
+   消除 Publish 的 `list.ToArray()` 分配，吸收 AlicizaX PendingChange / DGame EventDelegateData 的重入安全延迟增删（双印证），**并补上两个框架都缺的 handler 异常隔离**。这是当前最高价值、有真实 GC 靶点的项。
 
-3. **P1 — Phase-aware TGTaskScheduler**  
-   等 FramePhase 稳定后扩展 Scheduler。
+3. **P1 — Phase-aware TGTaskScheduler（Candidate 3）**
+   FrameLoop 已落地解锁此项；扩展 Yield/Delay 支持 phase + scaled/unscaled。可与 Candidate 7 协同。
 
-4. **P2 — Procedure Transition Result**  
+4. **P2 — Timer Catch-up Policy（Candidate 7，新增）**
+   修正 repeating timer 丢拍，每定时器可配 maxCatchUp。可并入 TimerModule 增强或随 C3 一起做。
+
+5. **P2 — SourceGen Diagnostics（Candidate 10，新增）**
+   投入小收益直接：让自动注册非法输入编译期报错，不再静默丢弃。
+
+6. **P2 — Procedure Transition Result（Candidate 4）**
    清理 Procedure 异步状态泄漏，让流程切换更 deep。
 
-5. **P2 — Generated Registry Diagnostics**  
-   提升自动注册可观察性。
+7. **P2 — Generated Registry Diagnostics（Candidate 5）**
+   提升自动注册运行时可观察性（与 C10 编译期诊断互补）。
 
-6. **P3 — Lightweight Pipeline Module**  
+8. **P3 — Lightweight Pipeline Module（Candidate 6）**
    在有真实启动链 / 登录链需求时引入。
 
-7. **P3 — Timer / Pool Diagnostics**  
-   只在真实性能与生命周期诊断需求出现后，从 DGame 的 GameTimer / Pool 思想中吸收 catch-up policy、容量、重复释放检查和诊断快照。
+9. **P3 — Pool / Timer Diagnostics（Candidate 9，新增）**
+   真实诊断需求出现后，吸收诊断快照 + generation-token 重复释放检测。
+
+10. **前置决策门 — Service Scope Layering（Candidate 8，新增）**
+    架构级，与「ModuleHost 单一容器」有张力。等 V2.3 UI / V2.5 场景真实需求出现、并先定 ADR 是否允许分层容器后再评估。
 
 ---
 
@@ -694,6 +886,12 @@ Procedure Stack 适合游戏状态和 UI 叠层，但启动链、登录链、资
 | DGame Unity UI / Input / Anim / GMPanel / SuperScrollView | 强绑定 Unity Runtime 与具体业务 UI |
 | DGame YooAsset / HybridCLR / Luban / Editor 工具链 | 会提前绑定资源、热更和构建链 |
 | DGame 静态 ModuleSystem / 弱类型 EventDispatcher | 与当前 typed EventBus 和实例化 Host 方向不一致 |
+| AlicizaX RootModule / AppServiceRoot / MonoServiceBehaviour | MonoBehaviour 驱动层，Core 禁用 UnityEngine，只能进 Adapter |
+| AlicizaX AppServices 静态全局单例 | 隐式全局状态，与 TryGet 显式 host 注入冲突 |
+| AlicizaX Cysharp.Text(ZString) / UniTask 依赖 | Core 零外部依赖原则，移植须改 string.Format / TGTask |
+| AlicizaX GameObjectPool / UI SourceGen 产物 | 强绑 UnityEngine/UnityEditor，属 UI Adapter（V2.3） |
+| AlicizaX Register 多契约绑定（TContract+TExtraContract） | 超出 ADR-0020 最小化范围 |
+| Dgame/Dgame（D 语言 2D 框架） | 非 Unity / 非 C# / 2019 归档，与 TryGet 完全无关 |
 
 ---
 
@@ -777,3 +975,22 @@ Procedure Stack 适合游戏状态和 UI 叠层，但启动链、登录链、资
 5. 任何会提前绑定 Unity 运行时、热更、资源打包工具链的实现。
 
 下一轮如果进入实现，建议从 **Candidate 1 — FrameLoop Module** 开始，因为它最符合当前 V2 Core 目标，且可以不接 Unity Runtime、纯 C# 验证。
+
+### 12bis. 第二轮（AlicizaX / DGame 复核，2026/05/30）增量结论
+
+Candidate 1 FrameLoop 已于 2026/05/30（提交 0bfc33f）落地。第二轮分析新增/强化的可吸收点：
+
+最值得优先吸收（均符合 ADR-0020、纯 C# 可验证）：
+
+1. **EventBus 零 GC + 重入安全延迟增删（强化 C2）**——AlicizaX `ServiceScope` PendingChange 与 DGame `EventDelegateData` **双印证**同一模式，对症 TryGet `Publish` 每次 `list.ToArray()` 分配。**关键：两个参考框架都不做 handler 异常隔离（DGame 抛异常会卡死延迟队列），TryGet 的 C2 要在吸收延迟增删的同时补上异常隔离——这是超越参考的设计点。**
+2. **SourceGen 编译期诊断（新增 C10）**——AlicizaX `ReportDiagnostic` 思路，对症 TryGet 生成器对非法输入静默 return null。投入小收益直接。
+3. **Timer 有界坏帧追赶（新增 C7）**——DGame catch-up 思想，但改为每定时器可配 maxCatchUp，修正其全局共享预算缺陷。
+
+谨慎/延后：
+
+4. **服务作用域分层（新增 C8）**——AlicizaX ServiceWorld 三层 scope，是 TryGet 缺失且对应 V2.3/V2.5 真实需求的能力，但与「ModuleHost 单一容器」定位有张力，**设为前置决策门**：先定 ADR 是否允许分层容器，等 UI/场景真实需求出现再评估。
+5. **池诊断 + generation-token（新增 C9）**——AlicizaX/DGame 双印证，低优先，真实诊断需求出现后再做。
+
+实现纪律重申：AlicizaX 的 Mono\* 驱动层 / AppServices 静态单例 / Cysharp.Text 依赖、DGame 的静态 ModuleSystem / 弱类型 int eventId 均为红线，吸收时只取纯 C# 机制、剥离 Unity 与第三方依赖、保持 ServerProject shadow csproj 可验证。
+
+**第二轮推荐起点**：进入实现时从 **Candidate 2（EventBus 零 GC + 生命周期，含异常隔离）** 开始——它是 P1、有真实 GC 靶点、双框架印证了实现模式、且 FrameLoop 已为其铺好基础。

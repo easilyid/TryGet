@@ -6,21 +6,25 @@
 
 ## 程序集布局
 
+**当前 V2.0 Route C 权威布局**：Core 按领域拆分为 Assembly/Event/Module/Async/Time/Logging/Timer/Pool/Procedure/Data/Net 等目录，Unity 依赖只允许在 `Runtime/Unity` Adapter 层出现。
+
 ```
 Assets/MyTryGetFramework/
 ├── Runtime/
 │   ├── Core/                                     # 纯 C# 核心 (noEngineReferences: true)
 │   │   ├── MyTryGetFramework.Core.asmdef
-│   │   ├── AssemblyInfo.cs                       # InternalsVisibleTo Tests
-│   │   ├── EventBus.cs                           # IEventBus 默认实现
-│   │   ├── Module/                               # 框架骨架
+│   │   ├── Assembly/                             # 程序集级配置
+│   │   │   └── AssemblyInfo.cs                   # InternalsVisibleTo Tests
+│   │   ├── Event/                                # 事件系统
+│   │   │   ├── EventBus.cs                       # IEventBus 默认实现（V2.1 零 GC 派发）
+│   │   │   ├── IEventBus.cs / IEventScope.cs / EventBusScopeExtensions.cs
+│   │   │   └── EventHandlerAttribute.cs / EventHandlerRegistry.cs
+│   │   ├── Module/                               # 框架骨架 / 启动 / 模块注册
 │   │   │   ├── IModule.cs / IUpdateModule.cs / ILateUpdateModule.cs
 │   │   │   ├── IEarlyUpdateModule.cs / IFixedUpdateModule.cs / IEndOfFrameModule.cs / FramePhase.cs  # V2.2 多阶段 Update
 │   │   │   ├── IModuleHost.cs / ModuleHost.cs
-│   │   │   ├── IEventBus.cs / IEventScope.cs / EventBusScopeExtensions.cs
 │   │   │   ├── Bootstrap.cs / BootstrapOptions.cs
 │   │   │   ├── ModuleAttribute.cs / AssemblyManifestRegistry.cs
-│   │   │   ├── EventHandlerAttribute.cs / EventHandlerRegistry.cs
 │   │   │   └── ModuleExceptions.cs
 │   │   ├── Async/                                # 异步原语（自研，零外部依赖）
 │   │   │   ├── TGTask.cs / TGTaskBody.cs / TGTaskCompletionSource.cs
@@ -28,19 +32,21 @@ Assets/MyTryGetFramework/
 │   │   │   ├── ITGTaskScheduler.cs / TGTaskScheduler.cs
 │   │   │   ├── TGTaskExpiredException.cs / TGTaskType.cs
 │   │   │   └── TimerModuleAsyncExtensions.cs
-│   │   ├── Common/                               # 基础服务
-│   │   │   ├── IClock.cs (含 SystemClock)
-│   │   │   ├── ILogger.cs / ConsoleLogger.cs / LogLevel.cs
-│   │   │   ├── ITimerModule.cs / TimerModule.cs / TimerHandle.cs
-│   │   │   ├── IPoolModule.cs / PoolModule.cs / IObjectPool.cs
-│   │   │   ├── IProcedure.cs (+ ProcedureBase, OnPause/OnResume V2.0 新增)
-│   │   │   ├── IAsyncProcedure.cs (+ AsyncProcedureBase)
-│   │   │   ├── IProcedureModule.cs (+ Push/Pop/Replace/StackDepth V2.0 新增)
-│   │   │   ├── ProcedureModule.cs (Stack 实现)
+│   │   ├── Time/                                 # 时间源
+│   │   │   └── IClock.cs (含 SystemClock)
+│   │   ├── Logging/                              # 日志
+│   │   │   └── ILogger.cs / ConsoleLogger.cs / LogLevel.cs
+│   │   ├── Timer/                                # 定时器
+│   │   │   └── ITimerModule.cs / TimerModule.cs / TimerHandle.cs
+│   │   ├── Pool/                                 # 对象池
+│   │   │   └── IPoolModule.cs / PoolModule.cs / IObjectPool.cs
+│   │   ├── Procedure/                            # 流程栈
+│   │   │   ├── IProcedure.cs / IAsyncProcedure.cs
+│   │   │   └── IProcedureModule.cs / ProcedureModule.cs
+│   │   ├── Data/                                 # 数据源契约 + 内存实现
 │   │   │   ├── ISerializer.cs
 │   │   │   ├── IKVStore.cs / MemoryKVStore.cs
-│   │   │   ├── IConfigSource.cs (+ ConfigNotFoundException)
-│   │   │   ├── ConfigLoader.cs / MemoryConfigSource.cs
+│   │   │   ├── IConfigSource.cs / ConfigLoader.cs / MemoryConfigSource.cs
 │   │   │   └── IAssetSource.cs / MemoryAssetSource.cs
 │   │   └── Net/                                  # 客户端网络（仅契约）
 │   │       ├── INetClient.cs (V2.0 简化版)
@@ -61,7 +67,7 @@ ModuleHost (框架根)
 ├── ITimerModule           — 定时器
 ├── IPoolModule            — 对象池
 ├── ITGTaskScheduler       — 异步调度
-├── IEventBus              — 全局事件（泛型 struct，类型安全）
+├── IEventBus              — 全局事件（泛型 struct，类型安全；V2.1 稳态 Publish 零 GC + 重入安全 + handler 异常隔离）
 ├── IProcedureModule       — 流程管理（Stack 模式 ★ V2.0 新增）
 │   ├── Push / Pop / Replace / StackDepth
 │   └── IProcedure: OnEnter / OnExit / OnPause / OnResume / OnUpdate
@@ -165,7 +171,7 @@ host.Shutdown();
 
 | 版本 | 主题 |
 |------|------|
-| V2.1 | 事件系统升级（零 GC + Source Gen 事件接口） |
+| V2.1 | 事件系统升级（稳态 Publish 零 GC + 派发中增删 next-publish-only + handler 异常隔离；Source Gen 事件接口后续继续）★ 代码实现完成；Shadow csproj 与生成测试 csproj build 通过；Unity EditMode 运行验证待办 |
 | V2.2 | ModuleHost 多阶段 Update（EarlyUpdate + FixedUpdate + EndOfFrame）★ 已随 V2.0 提前落地（ModuleHost 5 阶段派发 + 执行表分桶；FramePhase 枚举待 C3 决定去留） |
 | V2.3 | UI 框架（IUIModule + UIWindow/UIWidget） |
 | V2.4 | 资源管理（IAssetModule + YooAsset Adapter） |

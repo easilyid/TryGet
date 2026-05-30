@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 
 namespace TryGet.Tests
@@ -65,6 +66,29 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void Publish_InvokesInSubscribeOrder()
+        {
+            var bus = new EventBus();
+            string order = string.Empty;
+
+            bus.Subscribe<DamageEvent>(_ => order += "A");
+            bus.Subscribe<DamageEvent>(_ => order += "B");
+            bus.Subscribe<DamageEvent>(_ => order += "C");
+
+            bus.Publish(new DamageEvent());
+
+            Assert.AreEqual("ABC", order);
+        }
+
+        [Test]
+        public void Publish_NoSubscribers_NoOp()
+        {
+            var bus = new EventBus();
+
+            Assert.DoesNotThrow(() => bus.Publish(new DamageEvent { Amount = 1 }));
+        }
+
+        [Test]
         public void Publish_DifferentEventTypes_AreIsolated()
         {
             var bus = new EventBus();
@@ -89,7 +113,18 @@ namespace TryGet.Tests
 
             bus.Subscribe<DamageEvent>(Handler);
 
-            Assert.Throws<System.InvalidOperationException>(() => bus.Subscribe<DamageEvent>(Handler));
+            Assert.Throws<InvalidOperationException>(() => bus.Subscribe<DamageEvent>(Handler));
+        }
+
+        [Test]
+        public void Unsubscribe_NullOrMissing_NoOp()
+        {
+            var bus = new EventBus();
+
+            Assert.DoesNotThrow(() => bus.Unsubscribe<DamageEvent>(null));
+
+            void Handler(DamageEvent evt) { }
+            Assert.DoesNotThrow(() => bus.Unsubscribe<DamageEvent>(Handler));
         }
 
         [Test]
@@ -149,16 +184,178 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void Publish_HandlerThrows_StopsDispatchAndPropagates()
+        public void Publish_NestedPublish_PendingChangesFlushAtSafeBoundary()
+        {
+            var bus = new EventBus();
+            int firstCount = 0;
+            int secondCount = 0;
+            int nestedCount = 0;
+            bool nestedPublished = false;
+
+            void Second(DamageEvent evt)
+            {
+                secondCount++;
+            }
+
+            void First(DamageEvent evt)
+            {
+                firstCount++;
+                bus.Unsubscribe<DamageEvent>(Second);
+                if (!nestedPublished)
+                {
+                    nestedPublished = true;
+                    bus.Publish(new DamageEvent());
+                }
+            }
+
+            void Nested(SpawnEvent evt)
+            {
+                nestedCount++;
+            }
+
+            bus.Subscribe<DamageEvent>(First);
+            bus.Subscribe<DamageEvent>(Second);
+            bus.Subscribe<SpawnEvent>(Nested);
+
+            bus.Publish(new DamageEvent());
+            bus.Publish(new DamageEvent());
+            bus.Publish(new SpawnEvent());
+
+            Assert.AreEqual(3, firstCount);
+            Assert.AreEqual(2, secondCount, "Unsubscribe during outer publish must not affect nested same-event publish until the safe flush boundary.");
+            Assert.AreEqual(1, nestedCount);
+        }
+
+        [Test]
+        public void Publish_UnsubscribeThenResubscribeDuringDispatch_AffectsNextPublishOnly()
         {
             var bus = new EventBus();
             int callCount = 0;
 
-            bus.Subscribe<DamageEvent>(_ => throw new System.InvalidOperationException("boom"));
+            void Handler(DamageEvent evt)
+            {
+                callCount++;
+                bus.Unsubscribe<DamageEvent>(Handler);
+                bus.Subscribe<DamageEvent>(Handler);
+            }
+
+            bus.Subscribe<DamageEvent>(Handler);
+
+            Assert.DoesNotThrow(() => bus.Publish(new DamageEvent()));
+            Assert.DoesNotThrow(() => bus.Publish(new DamageEvent()));
+
+            Assert.AreEqual(2, callCount);
+            Assert.AreEqual(1, bus.GetSubscriberCount<DamageEvent>());
+        }
+
+        [Test]
+        public void Publish_LastHandlerUnsubscribesDuringDispatch_RemovesEventTypeFromDiagnostics()
+        {
+            var bus = new EventBus();
+
+            void Handler(DamageEvent evt)
+            {
+                bus.Unsubscribe<DamageEvent>(Handler);
+            }
+
+            bus.Subscribe<DamageEvent>(Handler);
+            bus.Publish(new DamageEvent());
+
+            Assert.AreEqual(0, bus.GetSubscriberCount<DamageEvent>());
+            CollectionAssert.DoesNotContain(bus.GetEventTypes(), typeof(DamageEvent));
+        }
+
+        [Test]
+        public void Publish_NestedPublish_AccumulatesExceptionsUntilOuterBoundary()
+        {
+            var bus = new EventBus();
+            bool nestedPublished = false;
+
+            void First(DamageEvent evt)
+            {
+                if (!nestedPublished)
+                {
+                    nestedPublished = true;
+                    bus.Publish(new DamageEvent());
+                }
+
+                throw new InvalidOperationException("outer");
+            }
+
+            void Second(DamageEvent evt)
+            {
+                throw new ArgumentException("inner-or-outer");
+            }
+
+            bus.Subscribe<DamageEvent>(First);
+            bus.Subscribe<DamageEvent>(Second);
+
+            bus.Publish(new DamageEvent());
+
+            Assert.AreEqual(4, bus.GetLastPublishExceptions<DamageEvent>().Count);
+        }
+
+        [Test]
+        public void Publish_HandlerThrows_ContinuesAndReports()
+        {
+            var bus = new EventBus();
+            int callCount = 0;
+
+            bus.Subscribe<DamageEvent>(_ => throw new InvalidOperationException("boom"));
             bus.Subscribe<DamageEvent>(_ => callCount++);
 
-            Assert.Throws<System.InvalidOperationException>(() => bus.Publish(new DamageEvent()));
-            Assert.AreEqual(0, callCount);
+            Assert.DoesNotThrow(() => bus.Publish(new DamageEvent()));
+            Assert.AreEqual(1, callCount);
+            Assert.AreEqual(1, bus.GetLastPublishExceptions<DamageEvent>().Count);
+            Assert.IsInstanceOf<InvalidOperationException>(bus.GetLastPublishExceptions<DamageEvent>()[0]);
+        }
+
+        [Test]
+        public void Publish_HandlerThrows_PendingChangesStillFlush()
+        {
+            var bus = new EventBus();
+            int secondCount = 0;
+            int thirdCount = 0;
+
+            void Second(DamageEvent evt)
+            {
+                secondCount++;
+            }
+
+            void First(DamageEvent evt)
+            {
+                bus.Unsubscribe<DamageEvent>(Second);
+                bus.Subscribe<DamageEvent>(_ => thirdCount++);
+                throw new InvalidOperationException("boom");
+            }
+
+            bus.Subscribe<DamageEvent>(First);
+            bus.Subscribe<DamageEvent>(Second);
+
+            bus.Publish(new DamageEvent());
+            bus.Publish(new DamageEvent());
+
+            Assert.AreEqual(1, secondCount, "Pending unsubscribe must flush even when a handler throws.");
+            Assert.AreEqual(1, thirdCount, "Pending subscribe must flush even when a handler throws.");
+        }
+
+        [Test]
+        public void Publish_SteadyState_DoesNotAllocateSnapshot()
+        {
+            var bus = new EventBus();
+            int count = 0;
+            bus.Subscribe<DamageEvent>(_ => count++);
+            bus.Subscribe<DamageEvent>(_ => count++);
+            bus.Subscribe<DamageEvent>(_ => count++);
+
+            bus.Publish(new DamageEvent());
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 8; i++)
+                bus.Publish(new DamageEvent());
+            long after = GC.GetAllocatedBytesForCurrentThread();
+
+            Assert.AreEqual(before, after, "Steady-state Publish should not allocate a ToArray snapshot.");
+            Assert.AreEqual(27, count);
         }
 
         [Test]
@@ -185,6 +382,36 @@ namespace TryGet.Tests
 
             Assert.AreEqual(1, EventHandlerRegistry.Count);
             CollectionAssert.AreEqual(new[] { registration }, EventHandlerRegistry.Snapshot());
+
+            EventHandlerRegistry.ClearForTests();
+        }
+
+        [Test]
+        public void EventHandlerRegistry_Register_AllowsLegacyDuplicates()
+        {
+            EventHandlerRegistry.ClearForTests();
+            Action<IEventBus> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
+
+            EventHandlerRegistry.Register(registration);
+            EventHandlerRegistry.Register(registration);
+
+            Assert.AreEqual(2, EventHandlerRegistry.Count);
+
+            EventHandlerRegistry.ClearForTests();
+        }
+
+        [Test]
+        public void EventHandlerRegistry_ApplyAll_FailFastByDefault()
+        {
+            EventHandlerRegistry.ClearForTests();
+            var bus = new EventBus();
+            int applied = 0;
+
+            EventHandlerRegistry.Register(_ => throw new InvalidOperationException("boom"));
+            EventHandlerRegistry.Register(_ => applied++);
+
+            Assert.Throws<InvalidOperationException>(() => EventHandlerRegistry.ApplyAll(bus));
+            Assert.AreEqual(0, applied);
 
             EventHandlerRegistry.ClearForTests();
         }
