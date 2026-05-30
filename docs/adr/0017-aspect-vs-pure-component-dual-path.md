@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（V0.9 起生效）
+Superseded by ADR-0020（V0.9 落地生效；V2.0 路线 C 移除自制 ECS / Aspect / IPureComponent 双轨后归档）
 
 ## Context
 

@@ -4,19 +4,16 @@ using System.Collections.Generic;
 namespace TryGet
 {
     /// <summary>
-    /// <see cref="IKVStore"/> 的内存实现（V0.8 起，替代 <see cref="MemorySaveModule"/>）。
+    /// <see cref="IKVStore"/> 的内存实现。
     ///
     /// 绕过 <see cref="ISerializer"/>，直接持 <c>Dictionary&lt;string, object&gt;</c>（zero-copy reference）。
     /// 仅测试 / Headless 用 — 重启数据丢失。
-    ///
-    /// Production Adapter（V1.1+）：<c>PlayerPrefsKVStore</c> / <c>SqliteKVStore</c> / <c>MongoDbKVStore</c>，
-    /// 这些会用 <see cref="ISerializer"/> 把 T 转 byte[]/string 落盘。
     /// </summary>
     public sealed class MemoryKVStore : IKVStore
     {
         private readonly Dictionary<string, object> _store = new Dictionary<string, object>();
 
-        public int Priority => -450; // 与原 MemorySaveModule.Priority 一致，保数据服务在业务前 OnInit
+        public int Priority => -450;
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
 
         public int Count => _store.Count;

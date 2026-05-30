@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（V1.0 起生效）
+Superseded by ADR-0020（V1.0 落地生效；V2.0 路线 C 移除服务端契约 INetServer/IConnection 与 IPlugPoint 网络生命周期后归档，仅简化保留 INetClient/INetMessage 客户端契约）
 
 ## Context
 

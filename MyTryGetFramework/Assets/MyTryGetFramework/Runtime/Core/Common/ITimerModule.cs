@@ -8,7 +8,7 @@ namespace TryGet
     /// 取消：cancel 已触发的 handle 返回 false，cancel 未触发的 handle 返回 true。
     /// 时间基准：默认走 scaled deltaTime（受 timeScale 影响），可通过 <see cref="ScheduleUnscaled"/> 走 unscaled。
     ///
-    /// V0.5 增强：ScheduleRepeat / Pause / Resume（关卡暂停 / 周期触发刚需）。
+    /// 支持一次性、周期性、暂停和恢复定时器。
     /// </summary>
     public interface ITimerModule : IModule
     {

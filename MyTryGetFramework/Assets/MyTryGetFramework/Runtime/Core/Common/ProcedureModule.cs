@@ -4,30 +4,25 @@ using TryGet.Async;
 
 namespace TryGet
 {
-    /// <summary>
-    /// IProcedureModule 默认实现。基于 string 状态键的跨帧状态机。
-    /// V0.6 Iter 7 起支持 <see cref="IAsyncProcedure"/> 异步路径。
-    /// </summary>
     public sealed class ProcedureModule : IProcedureModule
     {
         private readonly Dictionary<string, IProcedure> _procedures = new Dictionary<string, IProcedure>();
-        private IProcedure _current;
-        private string _currentId;
+        private readonly List<string> _stack = new List<string>();
         private IModuleHost _host;
-        private bool _isTransitioning;
 
-        // V0.6 Iter 7：异步生命周期状态
         private bool _isEntering;
         private bool _isExiting;
+        private int _pendingExitCount;
+        private int _exitVersion;
         private Exception _lastAsyncError;
 
         public int Priority => -200;
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
 
-        public string CurrentState => _currentId;
-        public bool IsRunning => _current != null;
+        public string CurrentProcedure => _stack.Count > 0 ? _stack[_stack.Count - 1] : null;
+        public bool IsRunning => _stack.Count > 0;
+        public int StackDepth => _stack.Count;
         public IModuleHost Host => _host;
-
         public bool IsEntering => _isEntering;
         public bool IsExiting => _isExiting;
         public Exception LastAsyncError => _lastAsyncError;
@@ -36,24 +31,30 @@ namespace TryGet
 
         public void Shutdown()
         {
-            if (_current != null)
+            if (_stack.Count > 0)
             {
-                try { _current.OnExit(this); }
-                catch { /* Shutdown 路径吞异常 */ }
+                for (int i = _stack.Count - 1; i >= 0; i--)
+                {
+                    var proc = _procedures[_stack[i]];
+                    try { proc.OnExit(this); } catch { }
+                }
+                _stack.Clear();
             }
-            _current = null;
-            _currentId = null;
             _procedures.Clear();
             _host = null;
             _isEntering = false;
             _isExiting = false;
+            _pendingExitCount = 0;
+            _exitVersion++;
             _lastAsyncError = null;
         }
 
         public void Update(float deltaTime, float unscaledDeltaTime)
         {
             if (_isEntering || _isExiting) return;
-            _current?.OnUpdate(this, deltaTime, unscaledDeltaTime);
+            if (_stack.Count == 0) return;
+            var current = _procedures[_stack[_stack.Count - 1]];
+            current.OnUpdate(this, deltaTime, unscaledDeltaTime);
         }
 
         public void AddProcedure(string id, IProcedure procedure)
@@ -64,112 +65,212 @@ namespace TryGet
                 throw new ArgumentNullException(nameof(procedure));
             if (_procedures.ContainsKey(id))
                 throw new InvalidOperationException($"Procedure '{id}' already registered.");
-
             _procedures[id] = procedure;
         }
 
         public void Start(string initial)
         {
-            if (_current != null)
+            if (_stack.Count > 0)
                 throw new InvalidOperationException(
-                    $"ProcedureModule already started (current: '{_currentId}'). Call Stop first or use TransitionTo.");
-            if (string.IsNullOrEmpty(initial))
-                throw new ArgumentException("Initial procedure id must be non-empty.", nameof(initial));
-            if (!_procedures.TryGetValue(initial, out var procedure))
-                throw new InvalidOperationException($"Procedure '{initial}' not registered.");
-
-            _current = procedure;
-            _currentId = initial;
-            _lastAsyncError = null;
-            _current.OnEnter(this);
-
-            if (_current is IAsyncProcedure asyncProc)
-            {
-                BeginAsyncEnter(asyncProc);
-            }
+                    $"ProcedureModule already started (current: '{CurrentProcedure}'). Call Stop first.");
+            EnterProcedure(initial);
         }
 
-        public void TransitionTo(string target)
+        public void Push(string target)
         {
-            if (_current == null)
+            ThrowIfAsync();
+            if (_stack.Count == 0)
                 throw new InvalidOperationException("ProcedureModule not started. Call Start first.");
-            if (_isEntering || _isExiting)
-                throw new InvalidOperationException(
-                    "Cannot TransitionTo while current procedure is in async Enter/Exit. Wait until async phase completes.");
-            if (string.IsNullOrEmpty(target))
-                throw new ArgumentException("Target procedure id must be non-empty.", nameof(target));
-            if (!_procedures.TryGetValue(target, out var next))
+
+            var currentProc = _procedures[_stack[_stack.Count - 1]];
+            currentProc.OnPause(this);
+            EnterProcedure(target);
+        }
+
+        public void Pop()
+        {
+            ThrowIfAsync();
+            if (_stack.Count == 0)
+                throw new InvalidOperationException("ProcedureModule stack is empty.");
+
+            ExitTop(() =>
+            {
+                if (_stack.Count > 0)
+                {
+                    var resumed = _procedures[_stack[_stack.Count - 1]];
+                    resumed.OnResume(this);
+                }
+            });
+        }
+
+        public void Replace(string target)
+        {
+            ThrowIfAsync();
+            if (_stack.Count == 0)
+                throw new InvalidOperationException("ProcedureModule not started. Call Start first.");
+            if (!_procedures.ContainsKey(target))
                 throw new InvalidOperationException($"Procedure '{target}' not registered.");
-            if (_isTransitioning)
-                throw new InvalidOperationException(
-                    "Re-entrant TransitionTo: cannot call TransitionTo from within OnEnter / OnExit. " +
-                    "If you need conditional re-transition, defer to next OnUpdate.");
 
-            _isTransitioning = true;
-            try
-            {
-                var prev = _current;
-                _lastAsyncError = null;
-
-                if (prev is IAsyncProcedure asyncPrev)
-                {
-                    BeginAsyncExit(asyncPrev, () => SwitchTo(next, target));
-                }
-                else
-                {
-                    try { prev.OnExit(this); }
-                    catch { throw; }
-                    SwitchTo(next, target);
-                }
-            }
-            finally
-            {
-                _isTransitioning = false;
-            }
+            ExitTop(() => EnterProcedure(target));
         }
 
         public void Stop()
         {
-            if (_current == null)
-                return;
+            if (_stack.Count == 0) return;
 
-            if (_current is IAsyncProcedure asyncProc)
+            _exitVersion++;
+            _isEntering = false;
+
+            if (_isExiting)
             {
-                if (_isEntering || _isExiting)
-                {
-                    try { _current.OnExit(this); }
-                    catch { }
-                    _current = null;
-                    _currentId = null;
-                    _isEntering = false;
-                    _isExiting = false;
-                    return;
-                }
-
-                BeginAsyncExit(asyncProc, () =>
-                {
-                    _current = null;
-                    _currentId = null;
-                });
+                _pendingExitCount = 0;
+                _stack.Clear();
                 return;
             }
 
-            try { _current.OnExit(this); }
-            catch { }
-            _current = null;
-            _currentId = null;
+            _pendingExitCount = 0;
+
+            for (int i = _stack.Count - 1; i >= 0; i--)
+            {
+                var proc = _procedures[_stack[i]];
+                ExitForStop(proc);
+            }
+
+            _stack.Clear();
         }
 
-        // ----------------- V0.6 Iter 7 async helpers -----------------
+        private void ExitForStop(IProcedure proc)
+        {
+            if (proc is IAsyncProcedure asyncProc)
+            {
+                ExitAsyncForStop(asyncProc);
+                return;
+            }
+
+            try { proc.OnExit(this); }
+            catch (Exception ex) { _lastAsyncError = ex; }
+        }
+
+        private void ExitAsyncForStop(IAsyncProcedure asyncProc)
+        {
+            try
+            {
+                var version = _exitVersion;
+                var task = asyncProc.OnExitAsync(this);
+                if (task.IsCompleted)
+                {
+                    try { task.GetAwaiter().GetResult(); }
+                    catch (Exception ex) { _lastAsyncError = ex; }
+                    try { asyncProc.OnExit(this); } catch { }
+                    return;
+                }
+
+                _pendingExitCount++;
+                _isExiting = true;
+                task.GetAwaiter().OnCompleted(() =>
+                {
+                    if (version != _exitVersion)
+                        return;
+
+                    try { task.GetAwaiter().GetResult(); }
+                    catch (Exception ex) { _lastAsyncError = ex; }
+                    try { asyncProc.OnExit(this); } catch { }
+                    _pendingExitCount--;
+                    if (_pendingExitCount == 0)
+                        _isExiting = false;
+                });
+            }
+            catch (Exception ex)
+            {
+                _lastAsyncError = ex;
+                try { asyncProc.OnExit(this); } catch { }
+            }
+        }
+
+        private void EnterProcedure(string id)
+        {
+            if (!_procedures.TryGetValue(id, out var proc))
+                throw new InvalidOperationException($"Procedure '{id}' not registered.");
+
+            _lastAsyncError = null;
+            _stack.Add(id);
+            proc.OnEnter(this);
+
+            if (proc is IAsyncProcedure asyncProc)
+                BeginAsyncEnter(asyncProc);
+        }
+
+        private void ExitTop(Action afterExit)
+        {
+            var id = _stack[_stack.Count - 1];
+            var proc = _procedures[id];
+
+            if (proc is IAsyncProcedure asyncProc)
+            {
+                BeginSyncExit(id, asyncProc, afterExit);
+            }
+            else
+            {
+                RemoveTop(id);
+                proc.OnExit(this);
+                afterExit?.Invoke();
+            }
+        }
+
+        private void BeginSyncExit(string id, IAsyncProcedure asyncProc, Action afterExit)
+        {
+            int version = ++_exitVersion;
+            _isExiting = true;
+            TGTask task;
+            try { task = asyncProc.OnExitAsync(this); }
+            catch (Exception ex)
+            {
+                _lastAsyncError = ex;
+                RemoveTop(id);
+                _isExiting = false;
+                try { asyncProc.OnExit(this); } catch { }
+                afterExit?.Invoke();
+                return;
+            }
+
+            if (task.IsCompleted)
+            {
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                RemoveTop(id);
+                try { asyncProc.OnExit(this); } catch { }
+                _isExiting = false;
+                afterExit?.Invoke();
+                return;
+            }
+
+            task.GetAwaiter().OnCompleted(() =>
+            {
+                bool isCurrentExit = version == _exitVersion;
+
+                try { task.GetAwaiter().GetResult(); }
+                catch (Exception ex) { _lastAsyncError = ex; }
+                if (isCurrentExit)
+                    RemoveTop(id);
+                try { asyncProc.OnExit(this); } catch { }
+                _isExiting = false;
+                if (isCurrentExit)
+                    afterExit?.Invoke();
+            });
+        }
+
+        private void RemoveTop(string id)
+        {
+            int index = _stack.Count - 1;
+            if (index >= 0 && _stack[index] == id)
+                _stack.RemoveAt(index);
+        }
 
         private void BeginAsyncEnter(IAsyncProcedure asyncProc)
         {
             _isEntering = true;
             TGTask task;
-            try
-            {
-                task = asyncProc.OnEnterAsync(this);
-            }
+            try { task = asyncProc.OnEnterAsync(this); }
             catch (Exception ex)
             {
                 _lastAsyncError = ex;
@@ -193,56 +294,11 @@ namespace TryGet
             });
         }
 
-        private void BeginAsyncExit(IAsyncProcedure asyncProc, Action afterExit)
+        private void ThrowIfAsync()
         {
-            _isExiting = true;
-            TGTask task;
-            try
-            {
-                task = asyncProc.OnExitAsync(this);
-            }
-            catch (Exception ex)
-            {
-                _lastAsyncError = ex;
-                _isExiting = false;
-                try { asyncProc.OnExit(this); }
-                catch (Exception innerEx) { _lastAsyncError = innerEx; }
-                afterExit?.Invoke();
-                return;
-            }
-
-            if (task.IsCompleted)
-            {
-                try { task.GetAwaiter().GetResult(); }
-                catch (Exception ex) { _lastAsyncError = ex; }
-                try { asyncProc.OnExit(this); }
-                catch (Exception ex) { _lastAsyncError = ex; }
-                _isExiting = false;
-                afterExit?.Invoke();
-                return;
-            }
-
-            task.GetAwaiter().OnCompleted(() =>
-            {
-                try { task.GetAwaiter().GetResult(); }
-                catch (Exception ex) { _lastAsyncError = ex; }
-                try { asyncProc.OnExit(this); }
-                catch (Exception ex) { _lastAsyncError = ex; }
-                _isExiting = false;
-                afterExit?.Invoke();
-            });
-        }
-
-        private void SwitchTo(IProcedure next, string targetId)
-        {
-            _current = next;
-            _currentId = targetId;
-            _current.OnEnter(this);
-
-            if (_current is IAsyncProcedure asyncNext)
-            {
-                BeginAsyncEnter(asyncNext);
-            }
+            if (_isEntering || _isExiting)
+                throw new InvalidOperationException(
+                    "Cannot perform stack operation while async Enter/Exit is in progress.");
         }
     }
 }

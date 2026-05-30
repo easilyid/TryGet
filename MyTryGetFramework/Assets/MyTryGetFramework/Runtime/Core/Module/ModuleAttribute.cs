@@ -7,8 +7,8 @@ namespace TryGet
     ///
     /// 使用：
     /// <code>
-    /// [Module(typeof(ILogModule))]
-    /// public sealed class ConsoleLogModule : ILogModule { ... }
+    /// [Module(typeof(ILogger))]
+    /// public sealed class ConsoleLogger : ILogger { ... }
     /// </code>
     ///
     /// Generator 扫描所有 <see cref="ModuleAttribute"/> 标记的类，生成
@@ -24,7 +24,7 @@ namespace TryGet
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
     public sealed class ModuleAttribute : Attribute
     {
-        /// <summary>Module 实现的服务接口（如 <c>typeof(ILogModule)</c>）。</summary>
+        /// <summary>Module 实现的服务接口（如 <c>typeof(ILogger)</c>）。</summary>
         public Type ServiceType { get; }
 
         public ModuleAttribute(Type serviceType)

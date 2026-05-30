@@ -1,134 +1,123 @@
 # MyTryGetFramework
 
-MyTryGetFramework 是一个围绕组合建模的 Unity 游戏框架上下文。V0.1 只覆盖核心运行时骨架，用 `World` / `Entity` / `Aspect` 表达运行边界、组合宿主和能力切片，以变种 ECS 的方式组织运行时语义。
+MyTryGetFramework 是一个纯客户端的 Unity 游戏服务框架上下文（V2.0 路线 C，ADR-0020）。框架围绕**服务生命周期管理**和**游戏流程编排**建模：用 `Module` 表达可被框架托管的服务单元，用 `ModuleHost` 作为框架根容器，用 `Procedure`（栈式）编排游戏流程，用 `EventBus` 做类型安全的模块间通信，用 `TGTask` 提供零外部依赖的异步原语。Core 保持纯 C#（不引用 UnityEngine），由 Shadow csproj 持续验证跨端可编译性。
+
+> **历史说明**：V0.1–V1.0 期间本上下文曾以变种 ECS（World/Entity/Aspect/System）建模。ADR-0020 起整套移除自制 ECS、服务端抽象、IPlugin 横切系统。下方词汇表已替换为路线 C 的真实领域语言；旧 ECS 词汇仅作历史保留，不再使用。
 
 ## Language (核心词汇)
 
-**World**:
-一个独立的游戏世界实例，承载一组 `Entity`、`System` 和生命周期。
-_Avoid_: Scene, Node, Domain
+**Module**:
+被 `ModuleHost` 托管的服务单元。通过服务接口（如 `ILogger`）注册，拥有 `OnInit` / `Shutdown` 生命周期、`Priority`（同级排序）和 `DependsOn`（依赖声明）。
+_Avoid_: System, Manager, Service（裸用）
 
-**Entity**:
-`World` 内承载身份、层级和生命周期的组合宿主。
-_Avoid_: GameObject, Actor, Object
+**ModuleHost**:
+框架根容器。负责 `Module` 的注册、依赖拓扑排序、生命周期驱动（Initialize / Shutdown）和多阶段帧派发，并持有全局 `EventBus`。
+_Avoid_: Container, World, Kernel
 
-**Aspect**:
-挂载到 `Entity` 上、封装自身状态和局部行为的组合能力切片。
-_Avoid_: Component, Trait, Part
+**FramePhase**:
+帧内固定的更新阶段，按 EarlyUpdate → FixedUpdate → Update → LateUpdate → EndOfFrame 顺序组织。`Module` 通过实现对应的帧接口（`IUpdateModule` / `IEarlyUpdateModule` / `IFixedUpdateModule` / `ILateUpdateModule` / `IEndOfFrameModule`）参与某阶段。
+_Avoid_: Tick, Stage, Step
 
-**System**:
-查询 `Aspect` 组合并执行跨 `Entity` 调度规则的运行单元。
-_Avoid_: Manager, Module, Processor
+**Procedure**:
+游戏流程的一个状态节点，拥有 `OnEnter` / `OnExit` / `OnPause` / `OnResume` / `OnUpdate` 生命周期。由 `ProcedureModule` 以**栈**方式编排（吸收 BigCat SceneMgr.stack）。
+_Avoid_: State（裸用）, Scene, Screen
 
-**Phase**:
-`World` 内固定的生命周期阶段，按进入 (Enter)、更新 (Update)、退出 (Exit) 组织调度。
-_Avoid_: State, Step, Mode
+**ProcedureModule**:
+流程状态机服务，以栈语义编排 `Procedure`：`Push`（暂停当前、入栈新节点）、`Pop`（出栈、恢复下层）、`Replace`（替换栈顶）、`Start` / `Stop`。
+_Avoid_: FSM（裸用）, Router, Navigator
 
-**SystemGroup**:
-`World` 内用于组织 `System` 执行顺序的调度分组。
-_Avoid_: Layer, Category, Bucket
+**EventBus**:
+全局类型安全事件总线。事件类型约束为 `struct`，通过 `Publish<T>` / `Subscribe<T>` / `Unsubscribe<T>` 收发。由 `ModuleHost` 持有。
+_Avoid_: Message, Signal, Dispatcher
+
+**EventScope**:
+事件订阅作用域。`Dispose` 时批量解绑该作用域内注册的所有 handler，用于把订阅生命周期绑定到 `Module` / `Procedure` 等宿主，防止泄漏。
+_Avoid_: Subscription, Token, Owner
+
+**TGTask**:
+自研异步原语（`readonly struct`，池化、version 防过期、单 continuation、单线程模型）。框架内一切异步操作用 `TGTask` 而非 `System.Threading.Tasks.Task`。
+_Avoid_: Task（裸指 BCL Task）, Coroutine, Promise
+
+**TGTaskScheduler**:
+异步调度服务，把"下一帧 / 延迟 N 秒 / 等待 N 帧"转化为可 await 的 `TGTask`。当前提供 `Yield` / `Delay` / `WaitForFrames`。
+_Avoid_: Timer（裸用）, Dispatcher
+
+**Source Generator (自动注册)**:
+编译期生成注册代码的机制。`[Module]` 特性 → 自动注册到 `AssemblyManifestRegistry`；`[EventHandler]` 特性 → 自动订阅到 `EventBus`（经 `EventHandlerRegistry`）。零运行时反射。
+_Avoid_: Reflection（运行时反射，路线 C 不用）, Scan
+
+**Bootstrap**:
+标准化启动入口。`CreateHost` 创建 `ModuleHost` 并预注册 Core 基础三件套（`ILogger` / `IClock` / `ITGTaskScheduler`），再 ApplyAll 应用 Source Generator 累积的自动注册。
+_Avoid_: Entry（裸用）, Main, Startup（裸用）
+
+**INetClient**:
+客户端网络连接契约（V2.0 简化版，无服务端模型）。Core 仅持接口，具体协议实现（TCP/KCP/WebSocket）留给 Adapter（V2.7）。
+_Avoid_: Socket, Connection（裸用）, INetServer（已移除）
+
+**IClock**:
+时间查询服务，提供 DeltaTime / ElapsedTime / FrameCount，解耦 Unity 的 `Time`。
+_Avoid_: Time, Timer
+
+**数据源契约 (IKVStore / IConfigSource / IAssetSource / ISerializer)**:
+Core 只持接口、不含真实实现（除内存 mock）。真实实现由 Unity 侧 Adapter 注入（如 YooAsset 实现 `IAssetSource`）。
+_Avoid_: 把具体实现（PlayerPrefs / YooAsset / JSON 库）写进 Core
 
 **Adapter**:
-连接框架核心模型与外部运行环境或技术设施的桥接单元。
+连接框架 Core 契约与外部运行环境（Unity / 网络协议 / 序列化库）的桥接单元，**不在 Core**。
 _Avoid_: Wrapper, Bridge, Proxy
-
-**Query**:
-`System` 用来按 `Aspect` 组合筛选 `Entity` 的条件表达。
-_Avoid_: SQL, Script, Predicate
-
-**Event**:
-分层传播的通知概念，分为 `Entity` 内通知、`World` 内事件和跨 `System` 事件。
-_Avoid_: Message, Signal, Bus
-
-**Tag**:
-只表达存在与否的轻量标记，不承载状态。
-_Avoid_: Flag, Marker, Label
-
-**EntityId**:
-在单个 `World` 内唯一的实体标识。
-_Avoid_: GlobalId, UUID
-
-**Handle**:
-指向 `Entity` 的弱引用句柄，需要时再解析目标。
-_Avoid_: StrongRef, Pointer
-
-**Ownership**:
-`Entity` 对子 `Entity` 的所有权关系。
-_Avoid_: Inheritance, Containment
-
-**Reference**:
-`Entity` 之间的弱引用关系，不参与所有权树。
-_Avoid_: Ownership, Parent
-
-**Attach**:
-把 `Entity` 纳入父 `Entity` 的所有权树。
-_Avoid_: Bind, Link
-
-**Detach**:
-把 `Entity` 从父 `Entity` 的所有权树中移出。
-_Avoid_: Unbind, Release
-
-**Scene**:
-仅用于 Unity 场景或资源侧语义，不作为核心运行域。
-_Avoid_: World, Runtime
 
 ## Relationships (关系)
 
-- 一个 **World** 包含零个或多个 **Entity**。
-- 一个 **Entity** 只能归属于一个确定的 **World**。
-- 一个 **Entity** 拥有 (own) 零个或多个 **Aspect**。
-- 一个 **Aspect** 拥有其自身的状态和局部行为。
-- 一个 **System** 使用 **Query** 来筛选目标 **Entity**。
-- 一个 **System** 通过匹配 **Entity** 的 **Aspect** 组合来对其进行操作。
-- 一个 **System** 拥有跨 `Entity` 的调度规则，而不是拥有单 `Entity` 的能力状态。
-- 一个 **Phase** 负责组织 **World** 内部的执行顺序。
-- 一个 **SystemGroup** 将 **System** 分组，以管理执行顺序和职责。
-- 一个 **Event** 可以存在于 **Entity** 级别、**World** 级别，或是跨 **System** 级别。
-- 一个 **Tag** 只是一个表示存在的标记，不包含状态。
-- 一个 **Adapter** 将 **World**、**Entity** 或 **Aspect** 概念与 Unity 或其他外部运行时连接起来。
-- 一个 **Entity** 最多只能有一个父 `Entity`。
-- 默认情况下，子 **Entity** 跟随其父 `Entity` 的生命周期。
-- 子 **Entity** 可以被显式地解除绑定 (Detach)，并继续独立存在。
-- 一个 **Entity** 可以通过 **Handle** 或弱 **Reference** 引用其他 **Entity**，但这不参与所有权 (Ownership) 树。
-- 一个 **EntityId** 仅在一个 **World** 内部是唯一的。
-- 一个 **World** 负责协调各个 **System**，但不会取代 **Entity** 的组合。
+- 一个 **ModuleHost** 托管零个或多个 **Module**。
+- 一个 **Module** 通过其服务接口注册到唯一的 **ModuleHost**。
+- 一个 **Module** 可声明 `DependsOn` 依赖其他 **Module**；**ModuleHost** 据此做拓扑排序决定 `OnInit` 顺序，`Shutdown` 按逆序。
+- 一个 **Module** 可实现一个或多个帧接口，从而参与对应的 **FramePhase**。
+- **ModuleHost** 持有唯一的 **EventBus**，供所有 **Module** 与业务代码共享。
+- 一个 **EventScope** 持有一组解绑动作，`Dispose` 时统一解绑；通常绑定到一个 **Module** 或 **Procedure** 的生命周期。
+- 一个 **ProcedureModule** 以栈方式持有零个或多个 **Procedure**；同一时刻栈顶 **Procedure** 为活动节点，其余被暂停。
+- 一个 **Procedure** 在被 `Push` 覆盖时 `OnPause`，在上层 `Pop` 后 `OnResume`。
+- **TGTaskScheduler** 是一个实现 `IUpdateModule` 的 **Module**，每帧驱动到期的 **TGTask** continuation。
+- **Bootstrap** 创建 **ModuleHost** 并预注册基础 **Module**，业务再追加自己的 **Module** 后调用 `Initialize`。
+- 数据源契约（**IKVStore** 等）与 **INetClient** 的真实实现由 **Adapter** 提供，不进入 Core。
 
 ## Example dialogue (对话示例)
 
-> **Dev (开发者):** "当玩家进入战斗时，我们需要为此创建一个 Unity Scene 对象吗？"
-> **Domain expert (领域专家):** "不 — 战斗是由一个 **World** 来表示的。玩家是一个 **Entity**，移动和状态等能力被建模为 **Aspect**，战斗的逻辑滴答（Tick）由 **System** 来处理，而 Unity 对象则是通过 **Adapter** 连接进来的。"
+> **Dev (开发者):** "玩家进入暂停菜单时，要把战斗流程销毁再重建吗？"
+> **Domain expert (领域专家):** "不 — 战斗是一个 **Procedure**。暂停菜单用 `ProcedureModule.Push("PauseMenu")`，战斗 **Procedure** 收到 `OnPause` 但保留在栈里；关闭菜单 `Pop` 后战斗 `OnResume` 原样恢复。状态不丢。"
+
+> **Dev:** "我想在所有 **Module** 更新之前先跑一段输入采集，放哪？"
+> **Domain expert:** "让那个 **Module** 实现 `IEarlyUpdateModule`，它就在 **FramePhase** 的 EarlyUpdate 阶段被 **ModuleHost** 驱动，先于普通 Update。"
 
 ## Flagged ambiguities (标记的歧义项)
 
-- 除非明确说明，否则 "Scene" 保留给 Unity 的场景加载语义；请使用 **World** 来表示框架的运行时边界。
-- 在核心领域语言中应避免使用 "Component"，因为它与 Unity components 和传统的 ECS 术语冲突；请使用 **Aspect** 表示框架的组合单元。
-- "Behavior" (行为) 必须明确区分是局部的 **Aspect** 行为，还是跨 `Entity` 的 **System** 行为。
-- "Unity integration" (Unity 集成) 属于 **Adapter** 的职责，不应出现在核心的 **Aspect** 或 **System** 中。
-- "Reference" (引用) 绝不代表所有权；仅使用 **Ownership** 来表示父子树状关系。
-- "Tag" (标签) 绝不承载状态；如果存在状态，它应该属于一个 **Aspect**。
-- "Query" (查询) 保持在 System 端的过滤模型层面，不能变成一种脚本语言。
+- "System" 在路线 C **不再是核心概念**（自制 ECS 已移除）。需要表达可托管服务时用 **Module**。
+- "Task" 默认指自研的 **TGTask**；如确指 BCL `System.Threading.Tasks.Task` 必须显式写全名。框架内异步一律用 TGTask。
+- "Scene" 仅用于未来 Unity 场景加载语义（V2.5 `ISceneModule`），不用来表达流程；游戏流程一律用 **Procedure**。
+- "Event" 指 **EventBus** 的 `struct` 事件；订阅生命周期归 **EventScope** 管理。不要引入裸 int/string eventId 的弱类型派发。
+- "Unity integration"（YooAsset / AudioSource / SceneManager / PlayerPrefs）属于 **Adapter** 职责，不应出现在 Core 的 Module 契约或实现中。
+- "注册"默认指 **Source Generator** 编译期自动注册（`[Module]` / `[EventHandler]`）或显式 `host.Register<T>()`；路线 C **不使用运行时反射扫描**。
 
-## Design constraints (设计约束 — 源自 ADR-0007~0010)
+## Design constraints (设计约束 — 源自 ADR-0011 / ADR-0012 / ADR-0020)
 
-**Aspect behavior scope (ADR-0007):**
-- 允许：操作自身字段的验证、计算、状态转换方法；发布 Entity-level Event。
-- 禁止：访问其他 Aspect、Entity、World 或外部服务；持有非自身字段的引用。
-- 边界：需要自身字段之外知识的方法属于 System。
+**Core 纯 C# 边界（ADR-0012 / ADR-0020）:**
+- `Runtime/Core/` 不得 `using UnityEngine` 或任何 Unity / 第三方协议库。
+- 由 `ServerProject/` 的 Shadow csproj（netstandard2.1，反向引用 Core 源）`dotnet build` 持续验证。
+- 任何"需要看屏幕、听声音、读 PlayerPrefs、连网络协议"的能力都属 Adapter，不在 Core。
 
-**System registration (ADR-0008):**
-- System 通过显式 API 注册到 World（非反射、非 Attribute 扫描）。
-- 每个 System 在注册时声明所属 SystemGroup 和 Phase（Enter/Update/Exit）。
-- SystemGroup 内的执行顺序 = 注册顺序。
-- System 可持有跨 Entity 状态（计时器/缓存），但禁止持有单 Entity 能力状态。
+**ModuleHost 契约（ADR-0011）:**
+- 注册必须用服务接口、不能用框架基础接口（`IModule` / 各帧接口 / `IEventBus`）或具体类；同一接口重复注册抛异常。
+- `Initialize` 做拓扑排序 + 依次 `OnInit`，中途失败倒序 `Shutdown` 回滚；`Shutdown` 按 `OnInit` 逆序、单 Module 异常不中断其余、最终聚合抛出。
+- 帧派发方法（EarlyUpdate / FixedUpdate / Update / LateUpdate / EndOfFrame）仅在 `IsInitialized` 后有效。
 
-**Query semantics (ADR-0009):**
-- V0.1 支持 All-of（全部包含）和 None-of（排除）两种谓词。
-- Any-of 推迟到 V0.1 之后。
+**路线 C 红线（ADR-0020）:**
+- 不恢复自制 ECS（Entity / Aspect / Tag / Query / System / SystemGroup / IPureComponent）。
+- 不恢复服务端抽象（INetServer / ConnectionId / ITickLoop）。
+- 不恢复 IPlugin / IPlugPoint / IPluginHost 横切系统。
+- 不为未来双端预留复杂系统（双端推迟 V3.0+）。
+- 命名表达真实职责，不为兼容旧设计保留错误命名。
 
-**Event scope (ADR-0010):**
-- V0.1 实现 Entity-level Event 和 World-level Event 两层。
-- Cross-System Event 推迟到 V0.1 之后（World-level Event 已覆盖 System 间通信）。
+## V2.0 scope (V2.0 范围)
 
-## V0.1 scope (V0.1 范围)
+V2.0 路线 C 收敛覆盖：服务骨架（**ModuleHost** / **Module** / **Bootstrap**）、全局事件（**EventBus** / **EventScope**）、异步原语（**TGTask** 全家桶 / **TGTaskScheduler**）、流程编排（**ProcedureModule** 栈模式）、基础服务（**ILogger** / **IClock** / **ITimerModule** / **IPoolModule**）、数据源契约（**IKVStore** / **IConfigSource** / **IAssetSource** / **ISerializer**）、**Source Generator** 自动注册（`[Module]` / `[EventHandler]`）、简化 **INetClient**。其中 **FramePhase** 多阶段 Update（原属 V2.2）已提前落地。
 
-V0.1 仅涵盖核心运行时骨架：**World**, **Entity**, **Aspect**, **System**, **Adapter**, **Phase**, **SystemGroup**，以及使这些术语更精确所需的最小配套词汇。编辑器工具、资源管线、热重载、网络和完整的配置系统都**有意地不在本次范围内** (out of scope)。
+UI、资源加载真实实现、场景管理、音频、客户端网络 Adapter、热更新都**有意不在 V2.0 范围**，按 V2.1–V2.8 路线图逐步补齐（见 `docs/strategy/V2-roadmap-tasks.md`）。双端扩展推迟到 V3.0+。

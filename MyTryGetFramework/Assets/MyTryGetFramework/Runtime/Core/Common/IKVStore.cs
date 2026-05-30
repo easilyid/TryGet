@@ -4,18 +4,12 @@ using System.Collections.Generic;
 namespace TryGet
 {
     /// <summary>
-    /// Key-Value 存储契约（V0.8 起，替代 <see cref="ISaveModule"/>）。
+    /// Key-Value 存储契约。
     ///
-    /// 强类型 Get/Set，统一 KV 抽象 — 与 V0.7 弱类型四件套（GetString/GetInt/GetFloat/GetBool）相比：
-    /// - 业务可存任意类型（reference type / value type / 自定义 struct）
-    /// - 序列化由 Adapter 注入 <see cref="ISerializer"/> 处理（<see cref="MemoryKVStore"/> 绕过）
-    /// - 与 ET / Fantasy 服务端 MongoDB 强类型路径一致
+    /// 强类型 Get/Set，统一 KV 抽象；业务可存任意类型，序列化由 Adapter 注入
+    /// <see cref="ISerializer"/> 处理（<see cref="MemoryKVStore"/> 绕过）。
     ///
-    /// **不支持嵌套事务 / 索引 / 查询**（IKVStore 不是 DB；真需要走 V1.1+ MongoDb / Sqlite Adapter）。
-    ///
-    /// 迁移路径（V0.8 → V0.9）：
-    /// - V0.8：<see cref="IKVStore"/> 与 <see cref="ISaveModule"/> 共存；<see cref="SaveModuleAdapter"/> 桥接
-    /// - V0.9：删 <see cref="ISaveModule"/> + <see cref="MemorySaveModule"/> + <see cref="SaveModuleAdapter"/>
+    /// **不支持嵌套事务 / 索引 / 查询**（IKVStore 不是 DB；真需要走专用 Adapter）。
     /// </summary>
     public interface IKVStore : IModule
     {

@@ -1,317 +1,236 @@
-# V2 路线图 — 任务拆解（V0.6 详细 + V0.7-V1.0 Epic 骨架）
+# V2 路线图 — 客户端服务框架 + 轻量 Procedure Stack
 
-> **撰写日期**：2026/05/24
-> **状态**：等待用户 review 后进入 V0.6 实施
-> **配套**：`docs/design/V2-commercial-framework-architecture.md`（设计本体）
-> **目的**：把设计文档 §6 的任务拆解落到可追踪的 Issue / Epic 粒度。V0.6 详细到 Iter 级，V0.7+ 仅给 Epic 级骨架，避免决策疲劳。
+> **修订日期**：2026/05/26
+> **当前状态**：V2.0 路线 C 已落地，进入 V2.1+ 客户端框架迭代
+> **配套文档**：`docs/design/V2.0-route-C-prd.md`、`docs/adr/0020-route-c-pivot.md`、`Assets/MyTryGetFramework/ARCHITECTURE.md`
+> **目的**：记录 V2.0 路线重定向后的实施事实与后续任务边界，避免继续沿旧的双端 / ECS / IPlugin 路线扩张。
 
 ---
 
-## 0. 实施前置条件
+## 0. 路线结论
 
-用户必须先就以下 4 个关键决策给出明确意见，否则 V0.6 启动后会反复返工：
+TryGet V2.0 的主线从“过早双端框架 + 自制 ECS + 横切 Plugin”重定向为：
 
-| # | 决策 | 默认方案 | 阻塞影响 |
+**纯客户端服务框架 + 轻量 Procedure Stack + 可验证的 Core 基础设施。**
+
+当前阶段只建设 Unity 客户端框架骨架。双端、服务端、Actor、Shared 业务层等内容延后到客户端架构稳定后再评估。
+
+### 0.1 V2.0 保留内容
+
+| 范围 | 状态 | 说明 |
+|---|---|---|
+| `ModuleHost` / `IModule` | 保留 | 继续作为框架根与模块生命周期基础 |
+| `IEventBus` / `IEventScope` | 保留 | 全局类型安全事件系统，不再绑定 Entity/World |
+| `TGTask` / Scheduler | 保留 | 自研异步原语已落地，继续作为 Core 异步基础 |
+| `IProcedureModule` | 升级 | 吸收 BigCat Scene Stack 思路，支持 Push/Pop/Replace |
+| `ILogger` / `IClock` / `ITimerModule` / `IPoolModule` | 保留 | 客户端基础服务 |
+| `IKVStore` / `IConfigSource` / `IAssetSource` / `ISerializer` | 保留 | 数据源与加载抽象 |
+| `[Module]` / `[EventHandler]` Source Generator | 保留 | 只保留客户端服务注册与事件订阅自动化 |
+| `INetClient` | 简化保留 | 只保留客户端网络契约，不再提前定义服务端模型 |
+
+### 0.2 V2.0 移除内容
+
+| 范围 | 状态 | 原因 |
+|---|---|---|
+| 自制 ECS / EC：Entity、Aspect、Tag、Query、SystemGroup、IPureComponent | 已移除 | 对当前 Unity 客户端框架过重，与 Module 系统职责混杂 |
+| IPlugin / IPlugPoint / IPluginHost | 已移除 | 当前横切点不足，不应在框架骨架阶段引入第二套扩展系统 |
+| 服务端契约：INetServer、ConnectionId、ITickLoop、IFrameLoop、Shared sample | 已移除 | 双端架构延后，当前只保留客户端网络入口 |
+| 旧 Module：ILogModule、IConfigModule、IResourceModule、ISaveModule、ILocalizationModule | 已移除 | 已被更小、更准确的接口替代 |
+| ECS 相关 Source Generator | 已移除 | Source Generator 只保留 Module / EventHandler 两条客户端主线 |
+
+---
+
+## 1. V2.0 — 路线 C 落地状态
+
+### 1.1 总目标
+
+完成从旧架构到客户端服务框架的收敛：删掉与当前阶段不匹配的系统，保留并强化真正需要的客户端框架骨架。
+
+### 1.2 Iter 结果
+
+| Iter | 主题 | 状态 | 关键产物 |
 |---|---|---|---|
-| **A** | **`ITask` 自研路线** vs **UniTask 包装路线** vs **混合方案**（Core 只暴露 `ITask` 接口，由 UniTask 实现） | **自研路线** | 阻塞 V0.6 全部 Iter |
-| **B** | **Aspect 保留行为** vs **改走 ET 纯数据 Component** | **保留 Aspect-with-methods，V0.9 增 `IPureComponent` 二级方案** | 阻塞 V0.9 ECS 二级方案 |
-| **C** | **`ILogModule` → `ILogger` 命名替换** 是否启动 | **V0.7 启动**（Obsolete 一个 minor 版本） | 阻塞 V0.7 |
-| **D** | **第一刀实施位置**：从 `ITask`（最致命缺口）开始 vs 从 `IEntry / Bootstrap`（最容易出双端样例）开始 | **从 `ITask` 开始**（设计文档 §6.1） | 决定 V0.6 / V0.7 顺序 |
-
-待这 4 个决策定下，才进入 V0.6 Iter 0。
-
----
-
-## 1. V0.6 — `ITask` 异步原语（详细到 Iter 级）
-
-### 1.1 V0.6 总目标
-
-让 Core 在 dotnet console 也能跑出 `async ITask MyMethod() { await timer.Delay(1f); await asset.LoadAsync(...); return; }` 这样的异步业务代码，**不依赖 UniTask、不依赖 `System.Threading.Tasks.Task`**。
-
-### 1.2 V0.6 成功标准（Definition of Done）
-
-1. `Samples/Net/Program.cs` 跑通：Boot → 异步加载 Config → 异步等待 1s → Login → 异步广播 → InGame（全部 `async ITask` 实现）。
-2. `Samples/Unity/TryGetMonoEntry.cs` 跑通同样流程（Unity Editor PlayMode）。
-3. 100 万次 `await timer.Delay(0)` 的 GC alloc < 1MB（pool 生效证明）。
-4. `dotnet build` Shadow csproj 仍然通过（不引入 Unity 依赖）。
-5. 测试覆盖 30+，全绿。
-6. CHANGELOG `[V0.6]` 条目完整。
-
-### 1.3 V0.6 Iter 列表
-
-| Iter | 主题 | 详细任务 | 依赖 | DoD |
-|---|---|---|---|---|
-| **0** | PRD `docs/design/V0.6-ITask.md` | 详细 API 设计 + 对标 ETTask / HTask / FTask 取舍 + 性能基准 + 已知失败模式 | 决策 A 通过 | 用户 review 通过 |
-| **1** | `ITask` 骨架 | `ITask` + `ITask<T>` + `Awaiter` struct + `AsyncITaskMethodBuilder` + `AsyncITaskMethodBuilder<T>` + `[AsyncMethodBuilder]` attribute | Iter 0 | `async ITask MyMethod() { return; }` 编译通过 |
-| **2** | `ITaskCompletionSource` | `ITaskCompletionSource` + `ITaskCompletionSource<T>` + `ITaskBody` 状态机内部接口 + 同步 `SetResult` / `SetException` / `SetCanceled` | Iter 1 | `var tcs = new ITaskCompletionSource(); var t = tcs.Task; tcs.SetResult();` 工作 |
-| **3** | `_version` 防过期 | 借鉴 hsenl HTask 的 `_version` 字段：struct 实例持 body 的 version 快照，body 回收时 version++；await 时校验失配抛 `TaskExpiredException` | Iter 2 | 测试覆盖 "ITask body 已 Reset 后被复制的 struct 实例 await" 抛异常 |
-| **4** | `TaskPool` 状态机池化 | `TaskPool.MaxPoolSize` + `TaskPool.GetCacheInfo<T>()` + body 复用机制；Pool 满时 body 不入池（直接 GC） | Iter 3 | 100 万 `await tcs.Task` 后 GC alloc < 1MB |
-| **5** | `ITaskScheduler` 接口 | `ITaskScheduler : IModule, IUpdateModule` + `Yield() / Delay(seconds) / WaitForFrames(int)` + 内部用环形队列管理 continuation | Iter 4 | `await scheduler.Delay(1f)` 在 1s 后正确 continuation |
-| **6** | `ITimerModule` 异步衔接 | `ITimerModule.WaitAsync(seconds): ITask` 扩展方法；保持现有 `Schedule(Action)` 不变 | Iter 5 | `await timer.WaitAsync(1f)` 工作 |
-| **7** | `IAsyncProcedure` + Procedure 异步支持 | `IAsyncProcedure : IProcedure` + `OnEnterAsync(): ITask` + `OnExitAsync(): ITask`；`ProcedureModule.TransitionTo` 检测异步路径 | Iter 6 | Procedure 可以 `OnEnterAsync()` 异步加载资源 |
-| **8** | 异常传播 + Cancellation | `ITaskException` 包装；`TaskCanceledException`；`ITask.Forget()` 显式 fire-and-forget；`ITaskScheduler` 全局 `OnUnobservedException` 钩子 | Iter 7 | 测试覆盖 "未 await 的 ITask 抛异常" 进入全局钩子 |
-| **9** | 测试覆盖 30+ | 基本 await / 异常 / pool 边界 / cancel / 嵌套 / 多次 await 同 ITask（应抛）/ 多次 SetResult（应抛）/ Forget / Procedure 异步流 | Iter 8 | 全绿 |
-| **10** | `Samples/Net/Program.cs` 雏形 | dotnet console 跑通 Boot → Delay 1s → Login → Delay 1s → InGame 三 Procedure 转移 | Iter 9 | `dotnet run` 输出三阶段切换 |
-| **11** | CHANGELOG `[V0.6]` 条目 + ARCHITECTURE.md V0.6 更新 | 文档同步 | Iter 10 | merge |
-
-### 1.4 V0.6 已知风险点
-
-| # | 风险 | 缓解 |
-|---|---|---|
-| 1 | `AsyncMethodBuilder` 与 C# 编译器交互复杂；C# 编译期可能因 attribute 缺失静默拒绝 async 方法 | Iter 1 写最小 spike 验证编译期行为，再扩展 |
-| 2 | `_version` int 溢出（int.MaxValue 次 await 后回绕）| 用 `int.MinValue` 作 "expired sentinel"，到 `MaxVersion = int.MaxValue - 2` 时主动 Reset Pool（参考 hsenl） |
-| 3 | Pool 在多线程场景下竞态 | V0.6 锁定单线程心智，多线程明确不支持；测试加 `ThrowIfNotMainThread` 检测 |
-| 4 | `OnCompleted` 同步执行 continuation 可能导致深递归爆栈 | 内部维护"调度深度计数器"，超过 16 层时强制入队 `TaskScheduler` 异步执行 |
-| 5 | `IAsyncProcedure` 与同步 `IProcedure` 共存的状态机复杂度 | 走 union 路径：`ProcedureModule` 内部判 `proc is IAsyncProcedure` 选异步流程，否则同步 |
-
-### 1.5 V0.6 回退方案
-
-如果 Iter 1-4（`ITask` 状态机 + Pool）实现风险超预期：
-
-- **回退到混合方案**：Core 暴露 `ITask` 接口（不是 struct，而是 interface），Unity Adapter 用 UniTask 实现，Net Adapter 用 `ValueTask` 包装实现。性能略差但实现简单。
-- 触发条件：Iter 3 完成时若 GC alloc 测试不达标 + 实现工作量已超 5 个工作日。
-
----
-
-## 2. V0.7 — Bootstrap + `ILogger` + `IClock`（Epic 级骨架）
-
-### 2.1 V0.7 总目标
-
-Core 获得"双端启动入口规范" + "日志接口现代化" + "时钟解耦 Unity Time"。
-
-### 2.2 V0.7 Epic 列表
-
-| Epic | 范围 | 关键产物 |
-|---|---|---|
-| **E1** | `IEntry / Bootstrap` 双端入口规范 | `IEntry.cs` + `Bootstrap.Run(entry, ctx)` + `BootstrapContext`；`Samples/Net/Program.cs` + `Samples/Unity/TryGetMonoEntry.cs` |
-| **E2** | `ILogger` 替代 `ILogModule` | `ILogger` + `ILogSink` 接口 + `ConsoleLoggerSink`；`ILogModule` 标记 Obsolete + 桥接实现保留一个 minor 版本 |
-| **E3** | `IClock` 替代直接读 `Time.deltaTime` | `IClock` 接口 + `SystemClock`（Net，外部传 dt）+ `UnityClock`（Adapter，读 `Time.*`）；`ITimerModule / EntityWorld / IProcedureModule` 改为读 `IClock` |
-| **E4** | `IEventScope`（订阅自动解绑） | 借鉴 TEngine `GameEventMgr`：订阅者持 `IEventScope` 实例，Dispose 时批量解绑所有 handler；保留现有 `Subscribe / Unsubscribe` API（共存） |
-| **E5** | V0.7 测试 20+ + CHANGELOG | 单测 + Samples 跑通 |
-
-### 2.3 V0.7 决策点
-
-- E2 / E3 是否在同一 Iter 完成 vs 拆两个 minor？（推荐：合并为 V0.7 一个 minor 落地）
-- E4 `IEventScope` 是否引入？（设计文档决策点 #11，需用户确认）
-
----
-
-## 3. V0.8 — KV / Config / Asset / Serializer 重构（Epic 级骨架）
-
-### 3.1 V0.8 总目标
-
-把 V0.5.5 残留的 `ISaveModule / IConfigModule / IResourceModule / ILocalizationModule` 重构为更通用的 "数据源 + 加载器" 抽象。
-
-### 3.2 V0.8 Epic 列表
-
-| Epic | 范围 | 关键产物 |
-|---|---|---|
-| **E1** | `IKVStore` 替代 `ISaveModule` | `IKVStore` + `MemoryKVStore`；`ISaveModule` Obsolete + 桥接；KV 强类型 `Get<T>/Set<T>` |
-| **E2** | `IConfigSource + ConfigLoader<T>` 替代 `IConfigModule` | `IConfigSource` 二进制 + JSON 双访问；`ConfigLoader<T>` 加载 + 热重载；`JsonConfigSource` Memory 实现 |
-| **E3** | `IAssetSource + ISerializer` 替代 `IResourceModule` | `IAssetSource.LoadAsync<T>(): ITask<T>`（与 V0.6 ITask 集成）；`ISerializer.Serialize/Deserialize<T>`；`MemoryAssetSource` + `JsonSerializer` |
-| **E4** | `ILocalizationModule` 评估降级 | 移到 `Optional/` 子目录；不再算 Core 标准模块；接口保持不变 |
-| **E5** | V0.8 测试 25+ + CHANGELOG | Round-trip 测试 + 桥接兼容性测试 |
-
----
-
-## 4. V0.9 — IPlugin（hsenl 风格切面）+ IPureComponent（ECS 二级方案）— **完整落地** ✓
-
-> 2026/05/24 修订：原 V0.9 路线含 Source Generator，拆分为 V0.9（运行时部分）+ V0.9.5（Source Generator 独立 minor）。
-
-### 4.1 V0.9 总目标
-
-吸收 hsenl IPlug 设计落地 ModuleHost 横切关注点；引入 `IPureComponent` ECS 二级方案与 Aspect 双轨并存。
-
-### 4.2 V0.9 Epic 列表（已全部完成）
-
-| Epic | 范围 | 状态 | 关键产物 |
-|---|---|---|---|
-| ~~**E1**~~ | ~~TryGet.SourceGenerator 独立 csproj 骨架~~ | **→ V0.9.5** | 转移 |
-| ~~**E2**~~ | ~~`[Module]` Attribute + AssemblyManifest.g.cs~~ | **→ V0.9.5** | 转移 |
-| ~~**E3**~~ | ~~`[SystemRegister]`~~ | **→ V0.9.5** | 转移 |
-| ~~**E4**~~ | ~~`[EventHandler]`~~ | **→ V0.9.5** | 转移 |
-| **E5** | `IPlugin / IPluginHost` 切面机制 | **Done** | `IPlugin.cs` + `ModuleHostPlugPoints.cs` + ModuleHost 集成 + 13 测试 |
-| **E6** | `IPureComponent`（ECS 二级方案）+ ADR-0017 | **Done** | `IPureComponent.cs` + `EntityPureComponentExtensions.cs` + ADR-0017 + 16 测试 |
-| **E7** | V0.9 测试 + CHANGELOG | **Done** | 29 新增测试 + CHANGELOG V0.9 段 + ARCHITECTURE V0.9 段 |
-
-### 4.3 V0.9 决策点结论
-
-- **E1-E4 → V0.9.5**：Source Generator 独立 csproj + Roslyn IIncrementalGenerator + Unity asmdef + 多 attribute 设计，工作量 ≈ V0.6 完整（11 Iter）。独立发布更稳。
-- **E5 IPlugin 先做**：不依赖 SourceGen，是 ModuleHost 切面机制的核心。命名升级 vs hsenl：`IPlug→IPlugin`、`IPluggable→IPluginHost`、`IPlugGroup→IPlugPoint`、`Init/Dispose→Install/Uninstall`；新增 `Priority` 字段与 Module 体系对齐。
-- **E6 IPureComponent 独立交付**：marker interface + 外置 IComponentSystem<T>，与 Aspect 双轨并存（ADR-0017）。V0.9 不自动调度（业务显式触发），自动调度留 V0.9.5。
-
----
-
-## 4.5 V0.9.5 — Source Generator 注册（**完整落地** — 7/7 Iter）
-
-### 4.5.1 V0.9.5 总目标
-
-引入 Roslyn IIncrementalGenerator 让 Module / System / EventHandler / IComponentSystem 自动注册，消除手动 `host.Register<>()` / `world.RegisterSystem(...)` / `bus.Subscribe<T>(...)` 调用。
-
-### 4.5.2 V0.9.5 Epic 列表（已全部完成）
-
-| Epic | 范围 | 状态 | 关键产物 |
-|---|---|---|---|
-| **E1** | `TryGet.SourceGenerator` 独立 csproj 骨架 | **Done (Iter 1)** | `Tools/MyTryGetFramework.SourceGenerator/` csproj + HelloWorldGenerator 烟测 |
-| **E2** | Unity asmdef 集成 + RoslynAnalyzer label | **Done (Iter 2)** | `Assets/.../Runtime/Core/Generators/` DLL + .meta with `RoslynAnalyzer` label |
-| **E3** | `[Module]` Attribute + 生成 `__AssemblyManifest.g.cs` | **Done (Iter 3)** | `ModuleAttribute` + `AssemblyManifestRegistry` + `ModuleManifestGenerator` + Samples/Net demo |
-| **E4** | `[SystemRegister]` + 生成 System 注册 | **Done (Iter 4)** | `SystemRegisterAttribute` + `SystemRegistry` + `SystemRegisterGenerator` |
-| **E5** | `[EventHandler]` + 生成 EventBus 订阅 | **Done (Iter 5)** | `EventHandlerAttribute` + `EventHandlerRegistry` + `EventHandlerGenerator` + Bootstrap 集成 |
-| **E6** | `IComponentSystem<T>` 自动调度（V0.9 IPureComponent 配套） | **Done (Iter 6)** | `ComponentSystemHooks<T>` + EntityPureComponentExtensions hook + `ComponentSystemGenerator` |
-| **E7** | V0.9.5 测试 + CHANGELOG | **Done (Iter 7)** | Samples/Net 端到端 3 路 demo + CHANGELOG/ARCHITECTURE/路线图 整段收尾 |
-
-### 4.5.3 V0.9.5 决策点结论
-
-- **`IIncrementalGenerator`（非 `ISourceGenerator`）**：2026 主流实践，Value-equatable DTO + ForAttributeWithMetadataName 入口高效
-- **Generator 在 repo root `Tools/` 下**：与 Unity Assets 完全隔离，PostBuild 自动 copy DLL 到 Unity
-- **Dual-trigger init**：.NET 端 `[ModuleInitializer]` + Unity 端 `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` + `[Preserve]` 防 IL2CPP strip
-- **AssemblyManifestRegistry / EventHandlerRegistry 限制**：仅看到 `ApplyAll` 调用前已 static-init 的 assemblies；后加载 assembly 注册不回填已构造 host
-- **SystemRegistry 业务显式 ApplyAll(world)**：避免多 world 实例下的注册歧义 + 测试隔离困难
-- **ComponentSystemGenerator 用接口实现触发**：IComponentSystem 是契约接口，不强制业务额外标 attribute（CreateSyntaxProvider + semantic 实现检查）
-
-### 4.5.4 V0.9.5 端到端验证证据
-
-`dotnet run Samples/Net` 输出（关键 3 行）：
-
-```
-[Info] Hello from V0.9.5 auto-registered Module, Samples/Net!        // [Module] auto-register
-[Info] TickEvent handler observed LastTickIndex = 42                 // [EventHandler] auto-subscribe
-[Info] CounterSystem observed AttachCount=1 DetachCount=1            // IComponentSystem auto-hook
-```
-
-业务 setup 内**没有任何 host.Register / bus.Subscribe / hook 手动注册**行 — 完全靠 attribute / interface + Generator + dual-trigger init 自动完成。
-
----
-
-## 5. V1.0 — 真双端样例 + 文档冻结（Epic 级骨架）
-
-### 5.1 V1.0 总目标
-
-发布**双端架构契约 + 网络抽象 + Shared 边界规范**。2026/05/24 用户指令"业务逻辑先轻放"重定向 — 原 MMO demo 推迟到 V1.2，本 V1.0 聚焦框架层契约。
-
-### 5.2 V1.0 Epic 列表（已全部完成）
-
-| Epic | 范围 | 状态 | 关键产物 |
-|---|---|---|---|
-| **E1** | `Samples/Shared/TryGet.Shared.csproj` + ADR-0018 Shared 边界规范 | **Done (Iter 1)** | Shared csproj + 跨端业务代码承载层 |
-| **E2** | `Runtime/Core/Net/` 网络抽象层（INetClient/Server/Connection/Message + ConnectionId/State + 5 IPlugPoint） | **Done (Iter 2)** | Core 契约 only，无具体协议实现 |
-| **E3** | `Runtime/Core/Time/` ITickLoop / IFrameLoop 时间循环抽象 | **Done (Iter 3)** | 服务端 fixed-tick + 客户端可变-帧契约 |
-| **E4** | `Samples/Unity/Entry/TryGetMonoEntry` MonoBehaviour 模板 | **Done (Iter 4)** | Unity 端启动标准模板 + 独立 asmdef |
-| **E5** | CHANGELOG + ARCHITECTURE V1.0 段 + ADR-0019 网络抽象定位 + 路线图修订 | **Done (Iter 5)** | 一个大 commit |
-| ~~**E6**~~ | ~~MMO Server/Client Demo~~ | **→ V1.2 Demo minor** | 业务 demo 不属本 minor |
-
-### 5.3 V1.0 决策点结论
-
-- **路线重定向（业务逻辑先轻放）**：原 V1.0 MMO demo 改为框架契约 minor，MMO demo 推迟 V1.2 Demo minor（依赖 V1.1 网络 Adapter 实现）
-- **Core 持网络契约，不含实现**（ADR-0019）：KCP / LiteNetLib / TCP 全部留 V1.1+ Adapter 范围
-- **Samples/Shared 源引用接入 Unity**（ADR-0018）：放弃 Plugin DLL 路线（避免调试 step-into 体验差）
-- **不定义 IEntry interface**（与 V0.7 决策一致）：5 商业框架（Fantasy/ET/BigCat/hsenl/TEngine）均无此抽象
-- **复用 V0.9 IPlugin 机制承载网络生命周期事件**：5 件 IPlugPoint（IOnConnectionStarted / Closed / RawDataReceived / MessageReceived / NetError）
-
-### 5.4 V1.0 端到端验证证据
-
-```
-$ cd ServerProject/MyTryGetFramework.Core && dotnet build     # 0/0
-$ cd Samples/Shared && dotnet build                            # 0/0
-$ cd Samples/Net && dotnet build                               # 0/0
-$ cd Tools/MyTryGetFramework.SourceGenerator && dotnet build   # 0/0
-```
-
-V1.0 契约 minor，无实现也无 demo 程序需要运行。Unity 端 .meta 待 Editor 内自动生成；
-Unity 端 PlayMode 测试集成留 V1.1 Adapter 落地后再做。
-
----
-
-## 5.5 V1.1 — 网络 / 序列化 Adapter（待启动）
-
-| Epic | 范围 | 关键产物 |
-|---|---|---|
-| **E1** | KCP Adapter（`Adapters/Network.Kcp/`） | INetClient/Server 首个真实现，验证 Core 契约可用性 |
-| **E2** | LiteNetLib Adapter（`Adapters/Network.LiteNetLib/`） | 验证多 Adapter 切换 |
-| **E3** | MemoryPack Adapter（`Adapters/MemoryPack/`） | ISerializer 真实现（INetMessage 序列化） |
-| **E4** | ServerTickDriver / UnityFrameDriver（`Samples/Net/*` / `Samples/Unity/*`） | ITickLoop / IFrameLoop driver 实例 |
-| **E5** | 网络中间件 Plugin 示例（心跳 / 重连 / 流量监控） | V0.9 IPlugin + V1.0 IPlugPoint 复用范例 |
-
-## 5.6 V1.2 — MMO 真双端 Demo（待启动）
-
-> 依赖 V1.1 Adapter 实现。原 V1.0 路线，按用户 2026/05/24 指令"业务逻辑先轻放"推迟到此。
-
-| Epic | 范围 | 关键产物 |
-|---|---|---|
-| **E1** | `Samples/Net/MmoServerDemo` | dotnet console 服务端：10 客户端连接 / 广播 / 断线重连 |
-| **E2** | `Samples/Unity/MmoClientDemo` | Unity Play 客户端：连服务端 / 收广播 / 显示 |
-| **E3** | 共享业务 Aspect / Entity / 网络消息（填入 `Samples/Shared/`） | 一份代码两端工作的最小可信样例 |
-| **E4** | 文档冻结：`ARCHITECTURE.md` V1.2 完整版 + 所有 ADR 状态确认 | review 通过 + tag `v1.2.0` |
-
----
-
-## 6. V1.1+ — 业务扩展层（独立仓库或 Samples/，不在 Core）
-
-不属于本路线图的"基础架构"范畴，但作为 V1.0 完整闭环的实现示例需要给出：
-
-| 模块 | 优先级 | 说明 |
-|---|---|---|
-| **Network Adapter** (KCP / TCP / WebSocket Channel + 拆粘包 + Plug 加密) | 高 | 真做时重写 ADR-0014（当前 Superseded） |
-| **HybridCLR Adapter** (`IHotfixLoader` Unity 实现) | 高 | 接口在 Core（V1+），实现 Unity 端 |
-| **YooAsset Adapter** (`IAssetSource` 实现) | 高 | 替代 V0.8 `MemoryAssetSource` |
-| **Luban Adapter** (`IConfigSource` 实现 + Editor 生成器) | 高 | 替代 V0.8 `JsonConfigSource` |
-| **MemoryPack Adapter** (`ISerializer` 实现) | 高 | V0.8 可以直接做（不阻塞 V1.0） |
-| **Samples/Unity/Adapters/** (V0.5.5 已迁的 Audio/Input/UI/Scene/PlayerPrefsSave) | 维护 | 保持工作 |
-| **Actor / MailBox / Location（参考 ET）** | 中 | V2+ 业务层，按需启动 |
-
----
-
-## 7. 实施流程（贴 Claude Code 工作流）
-
-### 7.1 单 Iter 实施模板
-
-1. 创建 `.scratch/v06-itask/iter-{N}/` 工作目录（Issue tracker 约定见 `docs/agents/issue-tracker.md`）
-2. PRD（如果是 Iter 0 / 整体设计变更）→ 用户 review
-3. 接口先行：写 `I*.cs` 接口 + 详细 XML doc 注释
-4. Shadow csproj `dotnet build` 验证不引入 Unity 依赖
-5. 实现：写 `MemoryXxx.cs` / 具体类
-6. 测试：EditMode 单测（PlayMode 仅在 Adapter 需要时用）
-7. CHANGELOG 条目 + ARCHITECTURE.md 局部更新
-8. commit + push（每 Iter 一 commit）
-
-### 7.2 跨 Iter / 跨 minor 的纪律
-
-- 每个 minor（V0.6 / V0.7 / V0.8 / V0.9 / V0.9.5 / V1.0）落地后打 git tag `v0.X.0`
-- 每个 minor 落地后更新 `ARCHITECTURE.md` 的"V0.5 之后路线图"段
-- 每个新 ADR 写完后更新 `ARCHITECTURE.md` 的"核心设计决策（ADR 索引）"表
-- 任何对 Core 公开接口的破坏性变更必须先发 ADR
-
----
-
-## 8. 用户决策清单（V0.6 启动前必答）
-
-| # | 问题 | 推荐 | 影响 |
-|---|---|---|---|
-| 1 | `ITask` 自研 vs UniTask 包装 vs 混合方案 | **自研** | V0.6 全部 |
-| 2 | Aspect 保留行为 vs 改纯数据 | **保留（写 ADR-0017）** | V0.9 ECS 二级方案 |
-| 3 | `ILogModule → ILogger` 命名替换启动时机 | **V0.7 启动** | V0.7 范围 |
-| 4 | V0.6 第一刀位置：ITask vs Bootstrap | **ITask（致命缺口优先）** | V0.6/V0.7 顺序 |
-| 5 | Adapter 退场后的 `Samples/Unity/Adapters/` 迁移是否已 commit | （查 git）若否，需先补齐 ADR-0016 §3 实施时序 | 历史包袱 |
-| 6 | 是否引入 `IEventScope`（TEngine GameEventMgr 风格） | **V0.7 引入** | V0.7 范围 |
-| 7 | Source Generator 引入时机 | **V0.9.5（独立 minor，2026/05/24 修订）** | V0.8 实施压力 |
-| 8 | 是否在 V0.6-V0.8 期间允许"用 UniTask 临时挡刀"（spike 验证）vs "纯自研到底" | **允许 spike，但 V0.6.0 release 前必须切回自研** | V0.6 工作量 |
-
----
-
-## 9. 与现有文档的关系
-
-| 文档 | 关系 |
+| 0 | PRD + ADR | Done | `docs/design/V2.0-route-C-prd.md`、`docs/adr/0020-route-c-pivot.md` |
+| 1 | ECS 整套移除 | Done | 移除 Entity/Aspect/Tag/Query/System/SystemGroup/IPureComponent 及相关测试 |
+| 2 | IPlugin 系统移除 | Done | `ModuleHost` 回归单一模块生命周期职责 |
+| 3 | 服务端契约移除 | Done | `INetClient` 简化为客户端契约，服务端/Shared 推迟 |
+| 4 | 废弃 Module 移除 | Done | 保留 `ILogger`、`IKVStore`、`IConfigSource`、`IAssetSource` 等准确命名接口 |
+| 5 | Procedure Stack | Done | `Start` / `Push` / `Pop` / `Replace`，新增 `OnPause` / `OnResume` |
+| 6 | 文档同步 | Done | `ARCHITECTURE.md`、`CHANGELOG.md`、本路线图同步到 V2.0 |
+
+### 1.3 V2.0 Definition of Done
+
+| 验证项 | 状态 |
 |---|---|
-| `docs/design/V2-commercial-framework-architecture.md` | 设计本体 → 本文档是其 §6 任务拆解的具体化 |
-| `docs/strategy/V2-direction-pivot.md` | 战略前情（做减法）→ 本文档承接做加法的执行节奏 |
-| `docs/adr/0016-adapter-layer-out-of-core-scope.md` | Adapter 退场决策 → 本文档默认前提 |
-| `Assets/MyTryGetFramework/ARCHITECTURE.md` | 每个 minor 落地后由本路线图反向更新 |
-| `CHANGELOG.md` | 每个 Iter / minor 落地后追加条目 |
+| Core 不引用 UnityEngine | 已由 Shadow csproj 持续验证 |
+| Samples/Net 可运行 | 已跑通当前主流程 |
+| Source Generator 可构建 | 保留 Module/EventHandler 后继续验证 |
+| Procedure Stack 行为有 EditMode 测试覆盖 | 已新增同步栈行为测试 |
+| 架构文档不再宣传 ECS / IPlugin / 双端为当前主线 | 已同步 |
 
 ---
 
-## 10. Verdict
+## 2. V2.1 — 事件系统升级
 
-**接受本路线图作为 V0.6+ 实施起点的前提**：用户给出第 §8 的 8 个决策回答（最少 #1 / #2 / #4 必答，其余可在 minor 启动时再答）。回答完成即进入 V0.6 Iter 0（PRD `docs/design/V0.6-ITask.md`）。
+### 2.1 目标
 
-实施阶段不再做大方向调整。若大方向要调整，回到 `V2-direction-pivot.md` + 本文档 review 流程。
+让事件系统更适合 Unity 客户端高频场景：降低 GC、强化生命周期管理，并保留当前 `IEventBus` 的简单使用体验。
+
+### 2.2 候选任务
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | 零 GC 事件派发评估 | 对比 TEngine GameEvent 风格与当前泛型 delegate 实现 |
+| E2 | Source Gen 事件接口 | 评估是否生成静态 invoker，避免运行时反射或装箱 |
+| E3 | EventScope 体验完善 | 确保订阅自动解绑在 UI / Procedure / Module 中一致可用 |
+| E4 | 压测与基准 | 高频事件、订阅/退订、异常隔离、重复订阅行为 |
+
+### 2.3 启动前决策
+
+- 是否接受更复杂的生成代码来换取更低 GC。
+- 是否继续保持 `IEventBus` 为唯一公开入口，避免暴露多套事件 API。
+
+---
+
+## 3. V2.2 — ModuleHost 多阶段 Update
+
+### 3.1 目标
+
+吸收 BigCat 多阶段 Update 的可取部分，但不引入 Worker/Node/分布式模型。
+
+### 3.2 候选任务
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | EarlyUpdate / FixedUpdate / LateUpdate 契约 | 在 `IUpdateModule` 外补齐常见 Unity 时序 |
+| E2 | 优先级排序一致性 | 确保多阶段模块排序、依赖拓扑、Shutdown 顺序一致 |
+| E3 | 时间源策略 | 明确 `IClock` 与 fixed delta / unscaled delta 的关系 |
+| E4 | Unity Adapter 桥接 | 由 MonoBehaviour 驱动 Core 多阶段循环 |
+
+### 3.3 不做范围
+
+- 不引入线程 Worker。
+- 不引入服务端 TickLoop。
+- 不把 Procedure 强行拆成多个阶段，除非真实客户端需求出现。
+
+---
+
+## 4. V2.3 — UI 框架
+
+### 4.1 目标
+
+建设客户端最常用的上层服务：窗口、层级、生命周期、异步打开、与 Procedure Stack 协作。
+
+### 4.2 候选任务
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | `IUIModule` 契约 | Open / Close / Get / IsOpen / 层级管理 |
+| E2 | `UIWindow` / `UIWidget` 基类 | 只放生命周期与上下文，不绑定具体业务逻辑 |
+| E3 | Procedure + UI 协作样例 | MainMenu / Gameplay / PauseMenu 与 Stack 对齐 |
+| E4 | Unity Adapter 实现 | 基于 prefab / Canvas / Addressables 或 YooAsset Adapter |
+
+### 4.3 不做范围
+
+- 不内置具体 UI 美术结构。
+- 不做业务 UI 模板生成器。
+- 不让 Core 引用 UnityEngine。
+
+---
+
+## 5. V2.4 — 资源管理 Adapter
+
+### 5.1 目标
+
+在 Core 保持 `IAssetSource` 抽象的前提下，为 Unity 客户端接入真实资源系统。
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | YooAsset Adapter | 推荐优先级最高，适配 `IAssetSource` |
+| E2 | Addressables Adapter 评估 | 作为可选替代方案，不强行双轨维护 |
+| E3 | 异步加载与释放语义 | 与 TGTask、引用计数、Procedure 生命周期对齐 |
+| E4 | 样例 | UI / 场景加载各一个最小可信样例 |
+
+---
+
+## 6. V2.5 — 场景管理
+
+### 6.1 目标
+
+在 Procedure Stack 之上补齐 Unity Scene 加载服务，而不是重新引入 Entity/Scene 双端模型。
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | `ISceneModule` 契约 | Load / Unload / Switch / ActiveScene |
+| E2 | Unity SceneManager Adapter | 仅 Adapter 层引用 UnityEngine.SceneManagement |
+| E3 | Procedure 驱动场景切换 | GameplayProcedure 进入时加载场景，退出时释放 |
+| E4 | 加载进度与取消策略 | 与 TGTask 和 UI Loading 协作 |
+
+---
+
+## 7. V2.6 — 音频管理
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | `IAudioModule` 契约 | BGM / SFX / Voice 基础能力 |
+| E2 | Unity AudioSource Adapter | 真实播放实现 |
+| E3 | 音量分组与持久化 | 与 `IKVStore` 协作 |
+
+---
+
+## 8. V2.7 — 客户端网络 Adapter
+
+### 8.1 目标
+
+只做客户端连接能力，不提前恢复服务端框架。
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | TCP / KCP / WebSocket 选型 Spike | 先做一个真实 Adapter，不一次性维护多套 |
+| E2 | 重连 / 心跳 | 作为客户端网络服务能力，不引入 IPlugin 系统 |
+| E3 | 消息序列化 | 通过 `ISerializer` 接入 MemoryPack / MessagePack 等 Adapter |
+| E4 | 最小客户端样例 | 连接、发送、接收、断线、重连 |
+
+---
+
+## 9. V2.8 — 热更新
+
+| Epic | 范围 | 说明 |
+|---|---|---|
+| E1 | HybridCLR 接入评估 | 只在 Unity Adapter / Tooling 层处理 |
+| E2 | 热更程序集边界 | Core / Unity / Hotfix 的引用方向必须清晰 |
+| E3 | Source Generator 与热更兼容 | 确认生成注册表在热更程序集加载后的行为 |
+
+---
+
+## 10. V3.0+ — 双端扩展候选
+
+双端架构不再是 V2 主线。只有当客户端框架稳定且出现明确服务端复用需求后，才重新评估：
+
+| 候选 | 前置条件 |
+|---|---|
+| EC / Entity 模型 | 客户端已有真实业务证明 Module + Procedure + UI/Scene 不足 |
+| 服务端 Tick / Actor / Mailbox | 有真实服务端样例需求，而不是为了架构完整性 |
+| Shared 业务层 | 客户端与服务端确实需要共享协议/配置/纯逻辑代码 |
+| INetServer | 已有客户端 INetClient Adapter 和协议层稳定之后 |
+
+---
+
+## 11. 实施纪律
+
+1. **客户端优先**：任何新增能力先说明 Unity 客户端使用场景。
+2. **Core 保持纯 C#**：`Runtime/Core` 不引用 UnityEngine。
+3. **命名准确优先**：接口名表达真实职责，不为兼容旧设计保留错误命名。
+4. **不为未来双端预留复杂系统**：没有当前需求的服务端/Actor/ECS/Plugin 不进入 Core。
+5. **每个 minor 必须同步验证**：Shadow csproj、Samples/Net、Source Generator、相关测试与文档。
+6. **文档服从代码事实**：现有代码不是权威，但落地后的当前代码和验证结果是汇报依据。
+
+---
+
+## 12. Verdict
+
+V2.0 路线 C 已作为新的架构基线接受：
+
+**TryGet 当前是客户端服务框架，不是双端框架，不是 ECS 框架，也不是 Plugin 框架。**
+
+后续 V2.x 只围绕 Unity 客户端框架能力补齐：事件、多阶段 Update、UI、资源、场景、音频、客户端网络、热更。双端扩展进入 V3.0+ 候选，等待真实需求再决策。

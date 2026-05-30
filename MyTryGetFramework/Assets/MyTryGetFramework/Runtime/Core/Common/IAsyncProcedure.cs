@@ -9,14 +9,14 @@ namespace TryGet
     /// 同时实现 <see cref="OnEnterAsync"/> / <see cref="OnExitAsync"/> 承载异步逻辑。
     ///
     /// 调度语义：
-    /// - <see cref="IProcedureModule.Start"/> / <see cref="IProcedureModule.TransitionTo"/> 进入此 Procedure 时：
+    /// - <see cref="IProcedureModule.Start"/> / <see cref="IProcedureModule.Replace"/> 进入此 Procedure 时：
     ///   1. 先同步调 <see cref="IProcedure.OnEnter"/>（与普通 IProcedure 兼容）
     ///   2. 再异步跑 <see cref="OnEnterAsync"/>
     /// - OnEnterAsync 未完成期间：
     ///   - <see cref="IProcedureModule.IsEntering"/> = true
     ///   - <see cref="IProcedureModule.Update"/> 跳过 OnUpdate 调用
-    ///   - 再次调 TransitionTo / Stop 抛 InvalidOperationException
-    /// - <see cref="IProcedureModule.Stop"/> / TransitionTo 离开此 Procedure 时同理跑 <see cref="OnExitAsync"/>。
+    ///   - 再次调 Replace / Stop 抛 InvalidOperationException
+    /// - <see cref="IProcedureModule.Stop"/> / Replace 离开此 Procedure 时同理跑 <see cref="OnExitAsync"/>。
     ///
     /// 异常处理：OnEnterAsync / OnExitAsync 抛异常时，异常存入
     /// <see cref="IProcedureModule.LastAsyncError"/> 供用户查询，状态机保留在当前 Procedure。

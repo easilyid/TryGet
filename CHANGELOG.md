@@ -2,7 +2,43 @@
 
 V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）。
 
-## V1.0 — 双端架构契约 + 网络抽象层 + Shared 代码边界
+## V2.0 — 路线 C 重定向：纯客户端服务框架 + Procedure Stack
+
+> 2026/05/26 架构重定向（ADR-0020）：基于 TEngine/BigCat/hsenl/Fantasy 四框架对比分析，
+> 从"双端框架"转向"纯客户端服务框架"。ECS/IPlugin/服务端契约全部移除。
+> ProcedureModule 升级为栈模式（吸收 BigCat SceneMgr.stack 设计）。
+
+### Removed
+
+- **ECS 整套**（~20 文件）：Entity/Aspect/Tag/Phase/Query/SystemBase/SystemGroup/IPureComponent/ComponentSystemHooks/BitArray256/TypeIndex/EntityWorld/EntityEventDispatcher/IWorldEventBus/SystemRegistry/WorldProxy + 13 个测试文件
+- **IPlugin 系统**：IPlugin/IPluginHost/IPlugPoint/ModuleHostPlugPoints + ModuleHost Plugin 代码 + PluginTests
+- **服务端契约**：INetServer/IConnection/ConnectionId/ConnectionState/NetPlugPoints/ITickLoop/IFrameLoop/Samples/Shared
+- **已废弃 Module**（~12 文件）：ILogModule/ConsoleLogModule/LogModuleAdapter/ISaveModule/MemorySaveModule/SaveModuleAdapter/IConfigModule/MemoryConfigModule/IResourceModule/MemoryResourceModule/ILocalizationModule/MemoryLocalizationModule + 5 个测试文件
+- **Source Generator**：SystemRegisterGenerator/ComponentSystemGenerator/HelloWorldGenerator
+
+### Changed
+
+- **INetClient** 简化为纯客户端接口（IsConnected / ConnectAsync / DisconnectAsync / Send / 4 events）
+- **ProcedureModule** 升级为 Stack 模式（Push/Pop/Replace/StackDepth + IProcedure.OnPause/OnResume）
+- **IModuleHost** 不再继承 IPluginHost
+- **ModuleHost.Update** 移除 BeforeUpdate/AfterUpdate plugin 触发
+- **WorldEventBus** 直接实现 IEventBus（移除 IWorldEventBus 中间接口）
+- **ConfigNotFoundException** 移入 IConfigSource.cs
+
+### Stats
+
+- Core 文件数：86 → 55（精简 36%；含 V2.2 FrameLoop 提前落地的 5 个文件 FramePhase/IEarlyUpdateModule/IFixedUpdateModule/IEndOfFrameModule + EventBus.cs，纯 V2.0 收敛态约 50）
+- 编译验证：Shadow csproj (netstandard2.1) + Samples/Net + Generator csproj 全部 0/0（dotnet 10.0.102 实跑）
+- Samples/Net `dotnet run` 端到端跑通（EXIT=0：[Module]/[EventHandler] 自动注册 + Boot→Login→InGame 异步流程）
+- Unity EditMode 测试：需 Unity Editor 验证（本环境无法跑），待并入 main 前确认全绿
+
+### 备注：V2.2 FrameLoop 提前落地
+
+本次提交同时包含 V2.2「ModuleHost 多阶段 Update」的实现：ModuleHost 已支持 EarlyUpdate/FixedUpdate/Update/LateUpdate/EndOfFrame 五阶段派发 + Initialize 期执行表分桶，实现进度领先路线图。ModuleHost.cs 的 V2.0 收敛改动（移除 IPlugin）与 V2.2 多阶段改动揉在同一文件，无法拆成两个独立可编译提交，故合并落地。`FramePhase` 枚举当前未被消费（派发靠 `is IXxxModule` 类型判断），去留待 C3 Phase-aware Scheduler 决策。
+
+---
+
+## V1.0 — 双端架构契约 + 网络抽象层 + Shared 代码边界（Superseded by V2.0）
 
 > 2026/05/24 用户指令"业务逻辑先轻放"重定向：原 V1.0 = MMO Server/Client Demo（业务重）改为"框架架构契约 + 网络抽象 + Shared 边界规范"，MMO demo 转 V1.1+ Adapter Demo minor。本 minor 仅契约不实现，KCP/LiteNetLib/TCP 实现全部留 V1.1+ Adapter。
 

@@ -8,7 +8,7 @@ namespace TryGet
     ///
     /// 暴露当前帧 dt + 累计时长 + 帧计数三件套，让 Module 业务无需直接读 <c>UnityEngine.Time</c>。
     /// Net 端由 <see cref="SystemClock"/> 通过 <see cref="IUpdateModule.Update"/> 注入 dt；
-    /// Unity 端可由 <c>Samples/Unity/Adapters/UnityClock</c>（V1.0+ 落地）读 <c>Time.deltaTime</c> 实现。
+    /// Unity 端可由后续 Unity Adapter 读 <c>Time.deltaTime</c> 实现。
     ///
     /// **不暴露 wall-clock**（<c>DateTime.UtcNow</c> / <c>Stopwatch.GetTimestamp</c>）：
     /// - Net 端服务器和 Unity 端客户端的 wall-clock 概念不同（时区 / 同步源 / NTP）

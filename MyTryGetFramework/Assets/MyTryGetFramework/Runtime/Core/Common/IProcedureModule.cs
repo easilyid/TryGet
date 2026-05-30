@@ -1,73 +1,35 @@
 namespace TryGet
 {
     /// <summary>
-    /// 跨帧流程状态机服务契约（V0.3 起，design.md §7）。
+    /// 跨帧流程状态机服务契约（V2.0 升级为栈模式，吸收 BigCat SceneMgr.stack 设计）。
     ///
-    /// 与 EntityWorld 的 Phase（帧内 Enter/Update/Exit 三档）正交：
-    /// - Phase 是帧内 ECS 调度层级
-    /// - Procedure 是跨帧的"游戏流程"层级（如 Boot → Login → InGame → Settle）
-    ///
-    /// 关键纪律（design.md §13 #6）：Procedure 不混入热更逻辑（修正 TEngine 反模式）。
-    /// 热更/资源加载是 ResourceModule / HotReloadModule 的职责，Procedure 只编排"何时切到哪一步"。
+    /// 栈语义：
+    /// - Push：暂停当前 → 新 Procedure 入栈
+    /// - Pop：栈顶退出 → 恢复下层
+    /// - Replace：栈顶退出 → 新 Procedure 替换栈顶
     /// </summary>
     public interface IProcedureModule : IModule, IUpdateModule
     {
-        /// <summary>
-        /// 当前活动 Procedure 的 id。未启动时为 null。
-        /// </summary>
-        string CurrentState { get; }
-
-        /// <summary>
-        /// 是否有 Procedure 正在运行。
-        /// </summary>
+        string CurrentProcedure { get; }
         bool IsRunning { get; }
-
-        /// <summary>
-        /// 持有的 ModuleHost 引用，在 <see cref="IModule.OnInit"/> 时被注入。
-        /// Procedure 通过此引用拉取其他 Module（如 ITimerModule / IEntityWorld）。
-        /// 未通过 ModuleHost 驱动时为 null。
-        /// </summary>
+        int StackDepth { get; }
         IModuleHost Host { get; }
 
-        /// <summary>
-        /// 注册一个 Procedure 到此 Module。id 在此 Module 内唯一，重复注册抛 <see cref="System.InvalidOperationException"/>。
-        /// </summary>
         void AddProcedure(string id, IProcedure procedure);
-
-        /// <summary>
-        /// 启动 Procedure 状态机。调用初始 Procedure 的 OnEnter。
-        /// 必须先 <see cref="AddProcedure"/> 注册 <paramref name="initial"/> id 对应的 Procedure。
-        /// </summary>
         void Start(string initial);
-
-        /// <summary>
-        /// 切换到目标 Procedure：当前 Procedure.OnExit → 目标 Procedure.OnEnter。
-        /// 同状态切换允许（视作 Exit → Enter 同状态重启）。
-        /// </summary>
-        void TransitionTo(string target);
-
-        /// <summary>
-        /// 停止状态机：调用当前 Procedure.OnExit 后置为未运行。
-        /// 允许重复调用（未运行时静默 return）。
-        /// </summary>
         void Stop();
 
-        /// <summary>
-        /// V0.6 Iter 7：当前是否处于 IAsyncProcedure 的 OnEnterAsync 异步阶段。
-        /// true 时 OnUpdate 不调度，TransitionTo / Stop 调用抛 InvalidOperationException。
-        /// </summary>
+        /// <summary>暂停当前 Procedure，将目标 Push 入栈。</summary>
+        void Push(string target);
+
+        /// <summary>退出栈顶 Procedure，恢复下层。栈空时等同 Stop。</summary>
+        void Pop();
+
+        /// <summary>退出栈顶 Procedure，将目标替换为新栈顶。</summary>
+        void Replace(string target);
+
         bool IsEntering { get; }
-
-        /// <summary>
-        /// V0.6 Iter 7：当前是否处于 IAsyncProcedure 的 OnExitAsync 异步阶段。
-        /// 语义同 <see cref="IsEntering"/>。
-        /// </summary>
         bool IsExiting { get; }
-
-        /// <summary>
-        /// V0.6 Iter 7：最近一次 OnEnterAsync / OnExitAsync 的异常（成功时为 null）。
-        /// 业务可在 TransitionTo 后查询，或绕过状态机自行重试。
-        /// </summary>
         System.Exception LastAsyncError { get; }
     }
 }

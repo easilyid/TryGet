@@ -5,14 +5,9 @@ using TryGet.Async;
 namespace TryGet
 {
     /// <summary>
-    /// 资源加载契约（V0.8 起，替代 <see cref="IResourceModule"/>）。
+    /// 资源加载契约。
     ///
-    /// 与 V0.4 <see cref="IResourceModule"/> 对比 —— 三大升级：
-    /// 1. **异步优先**：<see cref="LoadAsync{T}"/> 返回 <see cref="TGTask{T}"/>（V0.6 自研异步原语），
-    ///    解决 YooAsset / Addressables 异步加载在 Core 层无 await 表达的痛点
-    /// 2. **路径优先**：用 <c>path</c>（"Prefab/Player"）替代旧 <c>register/path</c> 二段式
-    /// 3. **解耦 YooAsset**：Core 仅定义 IAssetSource 接口，YooAsset Adapter 留 V1.1+
-    ///
+    /// Core 仅定义 IAssetSource 接口；真实 Unity 资源系统由后续 Adapter 实现。
     /// Memory 实现（<see cref="MemoryAssetSource"/>）走 Dictionary&lt;string, object&gt; + <see cref="TGTask{T}.FromResult"/>，
     /// 同步返回 — 用于测试 / Headless / Adapter 开发期 mock。
     ///
@@ -49,7 +44,7 @@ namespace TryGet
         int LoadedCount { get; }
     }
 
-    /// <summary>资源未找到异常（V0.8 起替代 <see cref="ResourceNotFoundException"/>）。</summary>
+    /// <summary>资源未找到异常。</summary>
     public sealed class AssetNotFoundException : InvalidOperationException
     {
         public string Path { get; }

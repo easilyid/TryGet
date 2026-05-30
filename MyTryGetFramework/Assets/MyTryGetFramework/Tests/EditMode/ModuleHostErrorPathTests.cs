@@ -6,7 +6,6 @@ namespace TryGet.Tests
 {
     /// <summary>
     /// ModuleHost 错误路径测试：Initialize 半失败回滚 + Shutdown 异常聚合 + DependsOn null 防御。
-    /// 来自迭代 1/2 Stage-2 review 的必改清单。
     /// </summary>
     [TestFixture]
     public class ModuleHostErrorPathTests
@@ -95,7 +94,7 @@ namespace TryGet.Tests
             host.Register<IGoodModule>(first);
             // 使用接口标识 last 与 middle 各自不同
             host.Register<IThrowOnShutdownModule>(middle);
-            // 单独 ILogModule 不在此范畴，省略 last 注册以保持类型简单
+            // 单独 ILogger 不在此范畴，省略 last 注册以保持类型简单
 
             host.Initialize();
             Assert.IsTrue(first.InitCalled);

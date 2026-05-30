@@ -4,17 +4,16 @@ using System.Collections.Generic;
 namespace TryGet
 {
     /// <summary>
-    /// <see cref="IConfigSource"/> 的内存实现（V0.8 起，替代 <see cref="MemoryConfigModule"/>）。
+    /// <see cref="IConfigSource"/> 的内存实现。
     ///
     /// 持 <c>Dictionary&lt;string, byte[]&gt;</c>，通过 <see cref="SetRaw"/> 显式注入数据。
     /// 仅测试 / Headless / Adapter 开发期 mock 用。
-    /// Production Adapter（V1.1+）：<c>LubanConfigSource</c> 从 Luban 生成的 .bytes 加载。
     /// </summary>
     public sealed class MemoryConfigSource : IConfigSource
     {
         private readonly Dictionary<string, byte[]> _data = new Dictionary<string, byte[]>();
 
-        public int Priority => -460; // 与原 MemoryConfigModule.Priority 一致
+        public int Priority => -460;
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
 
         public int Count => _data.Count;

@@ -5,13 +5,11 @@ using NUnit.Framework;
 namespace TryGet.Tests
 {
     /// <summary>
-    /// V0.8 Iter 2 — IKVStore / MemoryKVStore / SaveModuleAdapter 测试。
+    /// IKVStore / MemoryKVStore 测试。
     /// </summary>
     [TestFixture]
     public class KVStoreTests
     {
-        // ===== MemoryKVStore =====
-
         [Test]
         public void Memory_NewStore_EmptyKeys()
         {
@@ -153,88 +151,6 @@ namespace TryGet.Tests
 
             host.Shutdown();
         }
-
-        // ===== SaveModuleAdapter =====
-
-        [Test]
-        public void Adapter_BridgesStringPath()
-        {
-            #pragma warning disable CS0618
-            var legacy = new MemorySaveModule();
-            var adapter = new SaveModuleAdapter(legacy);
-            #pragma warning restore CS0618
-
-            adapter.Set("k", "v");
-            Assert.AreEqual("v", adapter.Get<string>("k"));
-        }
-
-        [Test]
-        public void Adapter_BridgesIntFloatBool()
-        {
-            #pragma warning disable CS0618
-            var legacy = new MemorySaveModule();
-            var adapter = new SaveModuleAdapter(legacy);
-            #pragma warning restore CS0618
-
-            adapter.Set("i", 42);
-            adapter.Set("f", 3.14f);
-            adapter.Set("b", true);
-
-            Assert.AreEqual(42, adapter.Get<int>("i"));
-            Assert.AreEqual(3.14f, adapter.Get<float>("f"), 0.0001f);
-            Assert.IsTrue(adapter.Get<bool>("b"));
-        }
-
-        [Test]
-        public void Adapter_UnsupportedType_Throws()
-        {
-            #pragma warning disable CS0618
-            var legacy = new MemorySaveModule();
-            var adapter = new SaveModuleAdapter(legacy);
-            #pragma warning restore CS0618
-
-            Assert.Throws<NotSupportedException>(() => adapter.Set("k", new List<int>()));
-        }
-
-        [Test]
-        public void Adapter_KeysAndCount_ReflectSetCalls()
-        {
-            #pragma warning disable CS0618
-            var legacy = new MemorySaveModule();
-            var adapter = new SaveModuleAdapter(legacy);
-            #pragma warning restore CS0618
-
-            adapter.Set("a", 1);
-            adapter.Set("b", "s");
-            adapter.Set("c", true);
-
-            Assert.AreEqual(3, adapter.Count);
-            Assert.IsTrue(((List<string>)new List<string>(adapter.Keys)).Contains("a"));
-        }
-
-        [Test]
-        public void Adapter_Remove_UpdatesBothStores()
-        {
-            #pragma warning disable CS0618
-            var legacy = new MemorySaveModule();
-            var adapter = new SaveModuleAdapter(legacy);
-            #pragma warning restore CS0618
-
-            adapter.Set("k", 1);
-            Assert.IsTrue(adapter.Remove("k"));
-            Assert.IsFalse(adapter.ContainsKey("k"));
-            #pragma warning disable CS0618
-            Assert.IsFalse(legacy.HasKey("k"));
-            #pragma warning restore CS0618
-        }
-
-        [Test]
-        public void Adapter_NullInner_Throws()
-        {
-            Assert.Throws<ArgumentNullException>(() => new SaveModuleAdapter(null));
-        }
-
-        // ===== helpers =====
 
         private struct Vec3 { public float X, Y, Z; }
     }

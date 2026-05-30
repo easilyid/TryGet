@@ -9,15 +9,13 @@ namespace TryGet
     /// 1. Bootstrap 阶段：调用 <see cref="Register{T}"/> 注册所有 Module 实例
     /// 2. 调用 <see cref="Initialize"/> 触发拓扑排序 + 依次 OnInit
     /// 3. 运行期：Module 内部通过 <see cref="Get{T}"/> 拉依赖，通过 <see cref="EventBus"/> 收发事件
-    /// 4. 帧驱动：Update / LateUpdate（迭代 2 加入）
+    /// 4. 帧驱动：EarlyUpdate / FixedUpdate / Update / LateUpdate / EndOfFrame
     /// 5. 关闭：<see cref="Shutdown"/> 按 OnInit 逆序执行
-    ///
-    /// V0.9 起继承 <see cref="IPluginHost"/>：host 直接可挂横切插件（<see cref="IPlugin"/>），无需 cast。
     /// </summary>
-    public interface IModuleHost : IPluginHost
+    public interface IModuleHost
     {
         /// <summary>
-        /// 全局事件总线。所有 Module 共享，替代 V0.1 的 IWorldEventBus。
+        /// 全局事件总线。所有 Module 共享。
         /// </summary>
         IEventBus EventBus { get; }
 
@@ -28,8 +26,8 @@ namespace TryGet
 
         /// <summary>
         /// 注册 Module 实例（必须在 Initialize 前）。
-        /// T 必须是 Module 自身定义的服务接口（如 <c>ILogModule</c>），不能是框架基础接口
-        /// （<see cref="IModule"/> / <see cref="IUpdateModule"/> / <see cref="ILateUpdateModule"/> / <see cref="IEventBus"/>），
+        /// T 必须是 Module 自身定义的服务接口（如 <c>ILogger</c>），不能是框架基础接口
+        /// （<see cref="IModule"/> / <see cref="IEarlyUpdateModule"/> / <see cref="IFixedUpdateModule"/> / <see cref="IUpdateModule"/> / <see cref="ILateUpdateModule"/> / <see cref="IEndOfFrameModule"/> / <see cref="IEventBus"/>），
         /// 也不能是具体类。同一接口重复注册抛 <see cref="System.InvalidOperationException"/>。
         /// </summary>
         void Register<T>(T module) where T : class, IModule;
@@ -52,6 +50,18 @@ namespace TryGet
         void Initialize();
 
         /// <summary>
+        /// 按 OnInit 顺序依次调用所有 <see cref="IEarlyUpdateModule"/> 实例的 EarlyUpdate。
+        /// 仅在 <see cref="IsInitialized"/>=true 时有效，否则抛 <see cref="System.InvalidOperationException"/>。
+        /// </summary>
+        void EarlyUpdate(float deltaTime, float unscaledDeltaTime);
+
+        /// <summary>
+        /// 按 OnInit 顺序依次调用所有 <see cref="IFixedUpdateModule"/> 实例的 FixedUpdate。
+        /// 仅在 <see cref="IsInitialized"/>=true 时有效，否则抛 <see cref="System.InvalidOperationException"/>。
+        /// </summary>
+        void FixedUpdate(float deltaTime, float unscaledDeltaTime);
+
+        /// <summary>
         /// 按 OnInit 顺序依次调用所有 <see cref="IUpdateModule"/> 实例的 Update。
         /// 仅在 <see cref="IsInitialized"/>=true 时有效，否则抛 <see cref="System.InvalidOperationException"/>。
         /// </summary>
@@ -62,6 +72,12 @@ namespace TryGet
         /// 仅在 <see cref="IsInitialized"/>=true 时有效，否则抛 <see cref="System.InvalidOperationException"/>。
         /// </summary>
         void LateUpdate(float deltaTime, float unscaledDeltaTime);
+
+        /// <summary>
+        /// 按 OnInit 顺序依次调用所有 <see cref="IEndOfFrameModule"/> 实例的 EndOfFrame。
+        /// 仅在 <see cref="IsInitialized"/>=true 时有效，否则抛 <see cref="System.InvalidOperationException"/>。
+        /// </summary>
+        void EndOfFrame(float deltaTime, float unscaledDeltaTime);
 
         /// <summary>
         /// 按 OnInit 的逆序依次调用所有 Module 的 Shutdown。允许多次调用（仅首次有效）。

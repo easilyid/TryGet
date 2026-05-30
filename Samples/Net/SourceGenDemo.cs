@@ -54,20 +54,5 @@ namespace TryGet.Samples.Net
         }
     }
 
-    /// <summary>Iter 6 demo PureComponent。</summary>
-    public sealed class CounterComponent : IPureComponent
-    {
-        public int Value;
-    }
-
-    /// <summary>Iter 6 demo System。实现 IComponentSystem 即被 Generator 自动 hook 到 ComponentSystemHooks。</summary>
-    public sealed class CounterSystem : IComponentSystem<CounterComponent>
-    {
-        public static int AttachCount;
-        public static int DetachCount;
-
-        public void OnAttach(Entity entity, CounterComponent component) { AttachCount++; }
-        public void OnDetach(Entity entity, CounterComponent component) { DetachCount++; }
-    }
 }
 

@@ -3,7 +3,7 @@ using NUnit.Framework;
 namespace TryGet.Tests
 {
     /// <summary>
-    /// Event 测试：Entity-level 和 World-level 事件 (ADR-0010)。
+    /// IEventBus 全局事件测试。
     /// </summary>
     [TestFixture]
     public class EventTests
@@ -15,111 +15,178 @@ namespace TryGet.Tests
 
         private struct SpawnEvent
         {
-            public EntityId EntityId;
+            public int EntityId;
         }
 
-        private class HealthAspect : Aspect
+        private struct OtherEvent
         {
-            public int Current { get; set; } = 100;
-
-            public void TakeDamage(int amount)
-            {
-                Current -= amount;
-                EventDispatcher?.Publish(new DamageEvent { Amount = amount });
-            }
+            public int Value;
         }
-
-        #region Entity-level Event
 
         [Test]
-        public void EntityEvent_SubscriberReceivesEvent()
+        public void Publish_SubscriberReceivesEvent()
         {
-            var world = new EntityWorld("Test");
-            Entity entity = world.CreateEntity();
+            var bus = new EventBus();
             int received = 0;
 
-            entity.Subscribe<DamageEvent>(evt => { received = evt.Amount; });
-
-            var health = new HealthAspect();
-            entity.Attach(health);
-            health.TakeDamage(25);
+            bus.Subscribe<DamageEvent>(evt => { received = evt.Amount; });
+            bus.Publish(new DamageEvent { Amount = 25 });
 
             Assert.AreEqual(25, received);
-
-            world.Shutdown();
         }
 
         [Test]
-        public void EntityEvent_UnsubscribedHandler_NotCalled()
+        public void Publish_UnsubscribedHandler_NotCalled()
         {
-            var world = new EntityWorld("Test");
-            Entity entity = world.CreateEntity();
+            var bus = new EventBus();
             int callCount = 0;
 
             void Handler(DamageEvent evt) => callCount++;
-            entity.Subscribe<DamageEvent>(Handler);
-            entity.Unsubscribe<DamageEvent>(Handler);
+            bus.Subscribe<DamageEvent>(Handler);
+            bus.Unsubscribe<DamageEvent>(Handler);
 
-            var health = new HealthAspect();
-            entity.Attach(health);
-            health.TakeDamage(10);
+            bus.Publish(new DamageEvent { Amount = 10 });
 
             Assert.AreEqual(0, callCount);
-
-            world.Shutdown();
-        }
-
-        #endregion
-
-        #region World-level Event
-
-        [Test]
-        public void WorldEvent_SubscriberReceivesEvent()
-        {
-            var world = new EntityWorld("Test");
-            int receivedCount = 0;
-
-            world.EventBus.Subscribe<SpawnEvent>(evt => { receivedCount++; });
-            world.EventBus.Publish(new SpawnEvent { EntityId = new EntityId(1, 1) });
-
-            Assert.AreEqual(1, receivedCount);
-
-            world.Shutdown();
         }
 
         [Test]
-        public void WorldEvent_UnsubscribedHandler_NotCalled()
+        public void Publish_MultipleSubscribers_AllReceive()
         {
-            var world = new EntityWorld("Test");
-            int callCount = 0;
-
-            void Handler(SpawnEvent evt) => callCount++;
-            world.EventBus.Subscribe<SpawnEvent>(Handler);
-            world.EventBus.Unsubscribe<SpawnEvent>(Handler);
-
-            world.EventBus.Publish(new SpawnEvent { EntityId = new EntityId(1, 1) });
-
-            Assert.AreEqual(0, callCount);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void WorldEvent_MultipleSubscribers_AllReceive()
-        {
-            var world = new EntityWorld("Test");
+            var bus = new EventBus();
             int count1 = 0, count2 = 0;
 
-            world.EventBus.Subscribe<SpawnEvent>(_ => count1++);
-            world.EventBus.Subscribe<SpawnEvent>(_ => count2++);
-            world.EventBus.Publish(new SpawnEvent());
+            bus.Subscribe<SpawnEvent>(_ => count1++);
+            bus.Subscribe<SpawnEvent>(_ => count2++);
+            bus.Publish(new SpawnEvent { EntityId = 1 });
 
             Assert.AreEqual(1, count1);
             Assert.AreEqual(1, count2);
-
-            world.Shutdown();
         }
 
-        #endregion
+        [Test]
+        public void Publish_DifferentEventTypes_AreIsolated()
+        {
+            var bus = new EventBus();
+            int damageCount = 0;
+            int spawnCount = 0;
+
+            bus.Subscribe<DamageEvent>(_ => damageCount++);
+            bus.Subscribe<SpawnEvent>(_ => spawnCount++);
+
+            bus.Publish(new DamageEvent { Amount = 5 });
+
+            Assert.AreEqual(1, damageCount);
+            Assert.AreEqual(0, spawnCount);
+        }
+
+        [Test]
+        public void Subscribe_DuplicateHandler_Throws()
+        {
+            var bus = new EventBus();
+
+            void Handler(DamageEvent evt) { }
+
+            bus.Subscribe<DamageEvent>(Handler);
+
+            Assert.Throws<System.InvalidOperationException>(() => bus.Subscribe<DamageEvent>(Handler));
+        }
+
+        [Test]
+        public void Publish_UnsubscribeDuringDispatch_AffectsNextPublishOnly()
+        {
+            var bus = new EventBus();
+            int firstCount = 0;
+            int secondCount = 0;
+
+            void First(DamageEvent evt)
+            {
+                firstCount++;
+                bus.Unsubscribe<DamageEvent>(Second);
+            }
+
+            void Second(DamageEvent evt)
+            {
+                secondCount++;
+            }
+
+            bus.Subscribe<DamageEvent>(First);
+            bus.Subscribe<DamageEvent>(Second);
+
+            bus.Publish(new DamageEvent());
+            bus.Publish(new DamageEvent());
+
+            Assert.AreEqual(2, firstCount);
+            Assert.AreEqual(1, secondCount);
+        }
+
+        [Test]
+        public void Publish_SubscribeDuringDispatch_AffectsNextPublishOnly()
+        {
+            var bus = new EventBus();
+            int firstCount = 0;
+            int secondCount = 0;
+
+            void Second(DamageEvent evt)
+            {
+                secondCount++;
+            }
+
+            void First(DamageEvent evt)
+            {
+                firstCount++;
+                if (bus.GetSubscriberCount<DamageEvent>() == 1)
+                    bus.Subscribe<DamageEvent>(Second);
+            }
+
+            bus.Subscribe<DamageEvent>(First);
+
+            bus.Publish(new DamageEvent());
+            bus.Publish(new DamageEvent());
+
+            Assert.AreEqual(2, firstCount);
+            Assert.AreEqual(1, secondCount);
+        }
+
+        [Test]
+        public void Publish_HandlerThrows_StopsDispatchAndPropagates()
+        {
+            var bus = new EventBus();
+            int callCount = 0;
+
+            bus.Subscribe<DamageEvent>(_ => throw new System.InvalidOperationException("boom"));
+            bus.Subscribe<DamageEvent>(_ => callCount++);
+
+            Assert.Throws<System.InvalidOperationException>(() => bus.Publish(new DamageEvent()));
+            Assert.AreEqual(0, callCount);
+        }
+
+        [Test]
+        public void Diagnostics_ReportSubscriberCountsAndEventTypes()
+        {
+            var bus = new EventBus();
+
+            bus.Subscribe<DamageEvent>(_ => { });
+            bus.Subscribe<SpawnEvent>(_ => { });
+
+            Assert.AreEqual(1, bus.GetSubscriberCount<DamageEvent>());
+            Assert.AreEqual(1, bus.GetSubscriberCount<SpawnEvent>());
+            Assert.AreEqual(0, bus.GetSubscriberCount<OtherEvent>());
+            CollectionAssert.AreEquivalent(new[] { typeof(DamageEvent), typeof(SpawnEvent) }, bus.GetEventTypes());
+        }
+
+        [Test]
+        public void EventHandlerRegistry_Snapshot_ReturnsRegisteredHandlers()
+        {
+            EventHandlerRegistry.ClearForTests();
+            Action<IEventBus> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
+
+            EventHandlerRegistry.Register(registration);
+
+            Assert.AreEqual(1, EventHandlerRegistry.Count);
+            CollectionAssert.AreEqual(new[] { registration }, EventHandlerRegistry.Snapshot());
+
+            EventHandlerRegistry.ClearForTests();
+        }
     }
 }

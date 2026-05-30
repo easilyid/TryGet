@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace TryGet.Tests
 {
     /// <summary>
-    /// V0.7 Iter 4 — IEventScope / EventScope / EventBus + Entity scope 扩展测试。
+    /// IEventScope / EventScope / EventBus scope 扩展测试。
     /// </summary>
     [TestFixture]
     public class EventScopeTests
@@ -208,64 +208,28 @@ namespace TryGet.Tests
             host.Shutdown();
         }
 
-        // ===== Entity scope 扩展 =====
-
         [Test]
-        public void Entity_Subscribe_WithScope_ReceivesEvent()
+        public void SingleScopeDispose_UnsubscribesMultipleBusHandlers()
         {
-            var world = new EntityWorld("Test");
-            var entity = world.CreateEntity();
-
-            int received = 0;
-            using (var scope = new EventScope())
-            {
-                entity.Subscribe<TestEvent>(e => received = e.Value, scope);
-                // 通过 Entity 的内部 dispatcher 发布需要 Aspect / framework hook，
-                // 这里直接走 Entity.Subscribe + 验证 scope 解绑路径
-                Assert.AreEqual(1, scope.RegisteredCount);
-            }
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void Entity_ScopeDispose_AfterEntityDestroyed_NoCrash()
-        {
-            var world = new EntityWorld("Test");
-            var entity = world.CreateEntity();
-
-            var scope = new EventScope();
-            entity.Subscribe<TestEvent>(_ => { }, scope);
-
-            world.DestroyEntity(entity);
-            // Entity 已销毁，scope.Dispose 应不抛（Unsubscribe 路径有 IsDestroyed 判断）
-            Assert.DoesNotThrow(() => scope.Dispose());
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void CrossBus_SingleScopeDispose_UnsubscribesAll()
-        {
-            // 同一 scope 同时关联 IEventBus + Entity，scope.Dispose 一次性解绑两端
             var host = new ModuleHost();
             host.Initialize();
-            var world = new EntityWorld("Test");
-            var entity = world.CreateEntity();
 
-            int busCount = 0, entityCount = 0;
+            int testCount = 0, anotherCount = 0;
             var scope = new EventScope();
-            host.EventBus.Subscribe<TestEvent>(_ => busCount++, scope);
-            entity.Subscribe<TestEvent>(_ => entityCount++, scope);
+            host.EventBus.Subscribe<TestEvent>(_ => testCount++, scope);
+            host.EventBus.Subscribe<AnotherEvent>(_ => anotherCount++, scope);
 
             host.EventBus.Publish(new TestEvent());
-            Assert.AreEqual(1, busCount);
+            host.EventBus.Publish(new AnotherEvent());
+            Assert.AreEqual(1, testCount);
+            Assert.AreEqual(1, anotherCount);
 
             scope.Dispose();
             host.EventBus.Publish(new TestEvent());
-            Assert.AreEqual(1, busCount, "scope Dispose 后 bus handler 不再触发");
+            host.EventBus.Publish(new AnotherEvent());
+            Assert.AreEqual(1, testCount);
+            Assert.AreEqual(1, anotherCount);
 
-            world.Shutdown();
             host.Shutdown();
         }
     }

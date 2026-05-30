@@ -8,7 +8,7 @@ namespace TryGet.Async
     ///
     /// 单线程模型：所有 API 必须在主线程调用。
     ///
-    /// 推荐 Priority：-150（介于 Procedure=-200 和 EntityWorld=-100 之间）。
+    /// 推荐 Priority：-150（介于 Procedure=-200 和用户模块默认优先级之间）。
     /// </summary>
     public interface ITGTaskScheduler : IModule, IUpdateModule
     {

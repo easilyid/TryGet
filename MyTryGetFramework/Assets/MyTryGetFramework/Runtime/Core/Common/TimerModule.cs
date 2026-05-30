@@ -10,7 +10,7 @@ namespace TryGet
     /// 精度：每帧 deltaTime 减法累积，长时定时器（&gt;10s）会有浮点漂移（量级毫秒）。
     /// 关键业务计时请避免直接依赖本实现，等待 V0.3+ 升级为绝对时间戳方案。
     ///
-    /// V0.5 增强：Repeating + Paused 状态字段（非破坏性，旧 API 行为完全不变）。
+    /// 支持一次性、周期性、暂停和恢复定时器。
     /// </summary>
     public sealed class TimerModule : ITimerModule, IUpdateModule
     {
@@ -18,12 +18,12 @@ namespace TryGet
         {
             public long Id;
             public float RemainingSeconds;
-            public float Interval;       // V0.5: 周期 timer 的触发间隔（一次性 timer 为 0）
+            public float Interval;
             public Action Callback;
             public bool Unscaled;
             public bool Cancelled;
-            public bool Repeating;       // V0.5: 周期 timer 标志
-            public bool Paused;          // V0.5: 暂停标志
+            public bool Repeating;
+            public bool Paused;
         }
 
         private readonly List<Entry> _entries = new List<Entry>();

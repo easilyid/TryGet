@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（V1.0 起生效）
+Superseded by ADR-0020（V1.0 落地生效；V2.0 路线 C 移除 Samples/Shared 跨端共享层后归档，双端推迟 V3.0+）
 
 ## Context
 

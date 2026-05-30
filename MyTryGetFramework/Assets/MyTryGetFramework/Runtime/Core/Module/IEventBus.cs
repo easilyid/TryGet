@@ -1,12 +1,11 @@
 using System;
+using System.Collections.Generic;
 
 namespace TryGet
 {
     /// <summary>
-    /// 全局事件总线契约（ADR-0010 + ADR-0011）。
-    /// 由 ModuleHost 持有，所有 Module / Aspect / 业务代码通过此发布或订阅全局事件。
-    ///
-    /// 替代 V0.1 的 <see cref="IWorldEventBus"/>——后者保留作为别名，新代码请用 IEventBus。
+    /// 全局事件总线契约。
+    /// 由 ModuleHost 持有，所有 Module / 业务代码通过此发布或订阅事件。
     /// </summary>
     public interface IEventBus
     {
@@ -24,5 +23,15 @@ namespace TryGet
         /// 取消订阅。未订阅过的 handler 静默返回，不抛异常。
         /// </summary>
         void Unsubscribe<T>(Action<T> handler) where T : struct;
+
+        /// <summary>
+        /// 获取指定事件类型当前订阅者数量。
+        /// </summary>
+        int GetSubscriberCount<T>() where T : struct;
+
+        /// <summary>
+        /// 获取当前存在订阅者的事件类型列表。
+        /// </summary>
+        IReadOnlyList<Type> GetEventTypes();
     }
 }

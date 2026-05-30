@@ -40,6 +40,12 @@ namespace TryGet
         /// <summary>已注册的委托数量（诊断用）。</summary>
         public static int Count => _registrations.Count;
 
+        /// <summary>获取当前注册委托快照（诊断用）。</summary>
+        public static IReadOnlyList<Action<IEventBus>> Snapshot()
+        {
+            return _registrations.ToArray();
+        }
+
         /// <summary>测试用：清空所有注册（生产代码不应调用）。</summary>
         internal static void ClearForTests()
         {

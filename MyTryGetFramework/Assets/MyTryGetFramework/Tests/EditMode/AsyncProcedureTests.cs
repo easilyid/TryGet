@@ -69,7 +69,7 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void AsyncProcedure_DuringIsEntering_TransitionToThrows()
+        public void AsyncProcedure_DuringIsEntering_ReplaceThrows()
         {
             var module = new ProcedureModule();
             module.OnInit(null);
@@ -80,7 +80,7 @@ namespace TryGet.Tests
 
             module.Start("p1");
 
-            Assert.Throws<InvalidOperationException>(() => module.TransitionTo("p2"));
+            Assert.Throws<InvalidOperationException>(() => module.Replace("p2"));
         }
 
         [Test]
@@ -100,7 +100,7 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void TransitionTo_AsyncExit_GoesThroughOnExitAsync()
+        public void Replace_AsyncExit_GoesThroughOnExitAsync()
         {
             var module = new ProcedureModule();
             module.OnInit(null);
@@ -111,15 +111,15 @@ namespace TryGet.Tests
             module.AddProcedure("next", next);
 
             module.Start("prev");
-            module.TransitionTo("next");
+            module.Replace("next");
 
             Assert.IsTrue(prev.OnExitAsyncCalled);
             Assert.IsTrue(prev.OnExitCalled);
-            Assert.AreEqual("next", module.CurrentState);
+            Assert.AreEqual("next", module.CurrentProcedure);
         }
 
         [Test]
-        public void TransitionTo_PendingExitAsync_IsExitingTrue()
+        public void Replace_PendingExitAsync_IsExitingTrue()
         {
             var module = new ProcedureModule();
             module.OnInit(null);
@@ -130,16 +130,16 @@ namespace TryGet.Tests
             module.AddProcedure("next", new ProcedureBaseStub());
 
             module.Start("prev");
-            module.TransitionTo("next");
+            module.Replace("next");
 
             Assert.IsTrue(module.IsExiting);
-            Assert.AreEqual("prev", module.CurrentState);
+            Assert.AreEqual("prev", module.CurrentProcedure);
 
             exitTcs.SetResult();
             exitTcs.Return();
 
             Assert.IsFalse(module.IsExiting);
-            Assert.AreEqual("next", module.CurrentState);
+            Assert.AreEqual("next", module.CurrentProcedure);
         }
 
         [Test]
@@ -176,6 +176,57 @@ namespace TryGet.Tests
 
             Assert.IsFalse(module.IsRunning);
             Assert.IsFalse(module.IsEntering);
+        }
+
+        [Test]
+        public void Stop_PendingReplace_DoesNotEnterReplacementAfterExitCompletes()
+        {
+            var module = new ProcedureModule();
+            module.OnInit(null);
+
+            var exitTcs = new TGTaskCompletionSource();
+            var prev = new TrackingExitAsyncProc(exitTcs);
+            var next = new EnterCountingProcedure();
+            module.AddProcedure("prev", prev);
+            module.AddProcedure("next", next);
+
+            module.Start("prev");
+            module.Replace("next");
+            module.Stop();
+
+            Assert.IsFalse(module.IsRunning);
+            exitTcs.SetResult();
+            exitTcs.Return();
+
+            Assert.IsTrue(prev.OnExitCalled);
+            Assert.AreEqual(0, next.EnterCount);
+            Assert.IsFalse(module.IsRunning);
+            Assert.IsFalse(module.IsExiting);
+        }
+
+        [Test]
+        public void Stop_PendingExitAsync_CallsOnExitAfterAsyncCompletes()
+        {
+            var module = new ProcedureModule();
+            module.OnInit(null);
+
+            var exitTcs = new TGTaskCompletionSource();
+            var proc = new TrackingExitAsyncProc(exitTcs);
+            module.AddProcedure("p1", proc);
+
+            module.Start("p1");
+            module.Stop();
+
+            Assert.IsTrue(proc.OnExitAsyncCalled);
+            Assert.IsFalse(proc.OnExitCalled);
+            Assert.IsTrue(module.IsExiting);
+            Assert.IsFalse(module.IsRunning);
+
+            exitTcs.SetResult();
+            exitTcs.Return();
+
+            Assert.IsTrue(proc.OnExitCalled);
+            Assert.IsFalse(module.IsExiting);
         }
 
         // ----------------- helpers -----------------
@@ -234,6 +285,40 @@ namespace TryGet.Tests
             public override TGTask OnEnterAsync(IProcedureModule module)
             {
                 throw new InvalidOperationException("from-onenterasync");
+            }
+        }
+
+        private sealed class TrackingExitAsyncProc : AsyncProcedureBase
+        {
+            private readonly TGTaskCompletionSource _exitTcs;
+
+            public bool OnExitAsyncCalled;
+            public bool OnExitCalled;
+
+            public TrackingExitAsyncProc(TGTaskCompletionSource exitTcs)
+            {
+                _exitTcs = exitTcs;
+            }
+
+            public override TGTask OnExitAsync(IProcedureModule module)
+            {
+                OnExitAsyncCalled = true;
+                return _exitTcs.Task;
+            }
+
+            public override void OnExit(IProcedureModule module)
+            {
+                OnExitCalled = true;
+            }
+        }
+
+        private sealed class EnterCountingProcedure : ProcedureBase
+        {
+            public int EnterCount;
+
+            public override void OnEnter(IProcedureModule module)
+            {
+                EnterCount++;
             }
         }
 

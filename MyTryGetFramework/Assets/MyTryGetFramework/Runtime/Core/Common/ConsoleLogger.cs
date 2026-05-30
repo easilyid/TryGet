@@ -5,12 +5,9 @@ namespace TryGet
 {
     /// <summary>
     /// <see cref="ILogger"/> 默认实现：写到 <see cref="Console.WriteLine"/>。
-    /// V0.7 起替代 <see cref="ConsoleLogModule"/>。
     ///
-    /// Priority=-1000（极早初始化，与原 <see cref="ConsoleLogModule"/> 一致），让其他 Module
-    /// 在自身 OnInit 中能 <c>host.Get&lt;ILogger&gt;()</c> 拿到可用 logger。
-    ///
-    /// 测试钩子：<see cref="CaptureToMemory"/> + <see cref="GetCapturedEntries"/> 复刻 <see cref="ConsoleLogModule"/> 行为。
+    /// Priority=-1000（极早初始化），让其他 Module 在自身 OnInit 中能
+    /// <c>host.Get&lt;ILogger&gt;()</c> 拿到可用 logger。
     /// </summary>
     public sealed class ConsoleLogger : ILogger
     {

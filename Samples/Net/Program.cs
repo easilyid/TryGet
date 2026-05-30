@@ -50,22 +50,17 @@ namespace TryGet.Samples.Net
             host.EventBus.Publish(new TickEvent(42));
             log.Info($"TickEvent handler observed LastTickIndex = {GameplayHandlers.LastTickIndex}");
 
-            // V0.9.5 Demo: CounterSystem 实现 IComponentSystem，被自动 hook 到 AttachHook/DetachHook。
-            var world = new EntityWorld("Demo");
-            var e = world.CreateEntity();
-            e.AddComponent(new CounterComponent { Value = 1 });
-            e.RemoveComponent<CounterComponent>();
-            log.Info($"CounterSystem observed AttachCount={CounterSystem.AttachCount} DetachCount={CounterSystem.DetachCount}");
+            // V0.9.5 Demo: [EventHandler] auto-subscribe verified above.
 
             log.Info("=== MainAsync start ===");
 
             proc.Start("boot");
             await WaitForEnter(proc, sched);
 
-            proc.TransitionTo("login");
+            proc.Replace("login");
             await WaitForEnter(proc, sched);
 
-            proc.TransitionTo("ingame");
+            proc.Replace("ingame");
             await WaitForEnter(proc, sched);
 
             log.Info("InGame] playing for 1.0s...");

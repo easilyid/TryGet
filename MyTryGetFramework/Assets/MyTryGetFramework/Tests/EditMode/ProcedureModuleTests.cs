@@ -57,11 +57,11 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void NotStarted_IsRunningFalse_CurrentStateNull()
+        public void NotStarted_IsRunningFalse_CurrentProcedureNull()
         {
             var p = new ProcedureModule();
             Assert.IsFalse(p.IsRunning);
-            Assert.IsNull(p.CurrentState);
+            Assert.IsNull(p.CurrentProcedure);
         }
 
         [Test]
@@ -99,7 +99,7 @@ namespace TryGet.Tests
 
             Assert.AreEqual(new[] { "enter:boot" }, log.ToArray());
             Assert.IsTrue(p.IsRunning);
-            Assert.AreEqual("boot", p.CurrentState);
+            Assert.AreEqual("boot", p.CurrentProcedure);
         }
 
         [Test]
@@ -145,7 +145,7 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void TransitionTo_TriggersExitThenEnter()
+        public void Replace_TriggersExitThenEnter()
         {
             var log = new List<string>();
             var p = new ProcedureModule();
@@ -154,14 +154,14 @@ namespace TryGet.Tests
             p.Start("a");
             log.Clear();
 
-            p.TransitionTo("b");
+            p.Replace("b");
 
             Assert.AreEqual(new[] { "exit:a", "enter:b" }, log.ToArray());
-            Assert.AreEqual("b", p.CurrentState);
+            Assert.AreEqual("b", p.CurrentProcedure);
         }
 
         [Test]
-        public void TransitionTo_SameState_ExitThenEnterAgain()
+        public void Replace_SameState_ExitThenEnterAgain()
         {
             // 同状态切换：视为 Exit → Enter 重启
             var log = new List<string>();
@@ -170,27 +170,27 @@ namespace TryGet.Tests
             p.Start("a");
             log.Clear();
 
-            p.TransitionTo("a");
+            p.Replace("a");
 
             Assert.AreEqual(new[] { "exit:a", "enter:a" }, log.ToArray());
-            Assert.AreEqual("a", p.CurrentState);
+            Assert.AreEqual("a", p.CurrentProcedure);
         }
 
         [Test]
-        public void TransitionTo_NotStarted_Throws()
+        public void Replace_NotStarted_Throws()
         {
             var p = new ProcedureModule();
             p.AddProcedure("a", new TracingProcedure(null, "a"));
-            Assert.Throws<InvalidOperationException>(() => p.TransitionTo("a"));
+            Assert.Throws<InvalidOperationException>(() => p.Replace("a"));
         }
 
         [Test]
-        public void TransitionTo_NotRegistered_Throws()
+        public void Replace_NotRegistered_Throws()
         {
             var p = new ProcedureModule();
             p.AddProcedure("a", new TracingProcedure(null, "a"));
             p.Start("a");
-            Assert.Throws<InvalidOperationException>(() => p.TransitionTo("missing"));
+            Assert.Throws<InvalidOperationException>(() => p.Replace("missing"));
         }
 
         [Test]
@@ -206,7 +206,7 @@ namespace TryGet.Tests
 
             Assert.AreEqual(new[] { "exit:a" }, log.ToArray());
             Assert.IsFalse(p.IsRunning);
-            Assert.IsNull(p.CurrentState);
+            Assert.IsNull(p.CurrentProcedure);
         }
 
         [Test]
@@ -249,7 +249,7 @@ namespace TryGet.Tests
         [Test]
         public void Procedure_CanTransitionFromOnUpdate()
         {
-            // 实际游戏场景：Procedure 在 OnUpdate 中根据条件触发 TransitionTo
+            // 实际游戏场景：Procedure 在 OnUpdate 中根据条件触发 Replace
             var log = new List<string>();
             var p = new ProcedureModule();
 
@@ -269,7 +269,7 @@ namespace TryGet.Tests
             // 期望：update:boot, update:boot, exit:boot, enter:login, update:login
             Assert.Contains("exit:boot", log);
             Assert.Contains("enter:login", log);
-            Assert.AreEqual("login", p.CurrentState);
+            Assert.AreEqual("login", p.CurrentProcedure);
         }
 
         [Test]
@@ -295,7 +295,152 @@ namespace TryGet.Tests
             Assert.Contains("exit:boot", log);
         }
 
-        // 帮助类：在第 N 次 Update 时触发 TransitionTo
+        // ==================== V2.0 Procedure Stack Tests ====================
+
+        private class StackProcedure : ProcedureBase
+        {
+            private readonly List<string> _log;
+            private readonly string _name;
+
+            public StackProcedure(List<string> log, string name) { _log = log; _name = name; }
+
+            public override void OnEnter(IProcedureModule m) => _log.Add($"enter:{_name}");
+            public override void OnExit(IProcedureModule m) => _log.Add($"exit:{_name}");
+            public override void OnPause(IProcedureModule m) => _log.Add($"pause:{_name}");
+            public override void OnResume(IProcedureModule m) => _log.Add($"resume:{_name}");
+            public override void OnUpdate(IProcedureModule m, float dt, float ud) => _log.Add($"update:{_name}");
+        }
+
+        [Test]
+        public void Push_PausesCurrentAndEntersTarget()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.AddProcedure("game", new StackProcedure(log, "game"));
+            p.AddProcedure("pause", new StackProcedure(log, "pause"));
+            p.Start("game");
+            log.Clear();
+
+            p.Push("pause");
+
+            Assert.AreEqual(new[] { "pause:game", "enter:pause" }, log.ToArray());
+            Assert.AreEqual("pause", p.CurrentProcedure);
+            Assert.AreEqual(2, p.StackDepth);
+        }
+
+        [Test]
+        public void Pop_ExitsTopAndResumesUnder()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.AddProcedure("game", new StackProcedure(log, "game"));
+            p.AddProcedure("pause", new StackProcedure(log, "pause"));
+            p.Start("game");
+            p.Push("pause");
+            log.Clear();
+
+            p.Pop();
+
+            Assert.AreEqual(new[] { "exit:pause", "resume:game" }, log.ToArray());
+            Assert.AreEqual("game", p.CurrentProcedure);
+            Assert.AreEqual(1, p.StackDepth);
+        }
+
+        [Test]
+        public void PushPop_Nested_RestoresOuterOnly()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.AddProcedure("game", new StackProcedure(log, "game"));
+            p.AddProcedure("pause", new StackProcedure(log, "pause"));
+            p.AddProcedure("settings", new StackProcedure(log, "settings"));
+            p.Start("game");
+
+            p.Push("pause");
+            p.Push("settings");
+            Assert.AreEqual(3, p.StackDepth);
+            Assert.AreEqual("settings", p.CurrentProcedure);
+
+            log.Clear();
+            p.Pop();
+            Assert.AreEqual(new[] { "exit:settings", "resume:pause" }, log.ToArray());
+            Assert.AreEqual("pause", p.CurrentProcedure);
+
+            log.Clear();
+            p.Pop();
+            Assert.AreEqual(new[] { "exit:pause", "resume:game" }, log.ToArray());
+            Assert.AreEqual("game", p.CurrentProcedure);
+        }
+
+        [Test]
+        public void Replace_ExitsTopAndEntersNew_StackDepthUnchanged()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.AddProcedure("a", new StackProcedure(log, "a"));
+            p.AddProcedure("b", new StackProcedure(log, "b"));
+            p.Start("a");
+            log.Clear();
+
+            p.Replace("b");
+
+            Assert.AreEqual(new[] { "exit:a", "enter:b" }, log.ToArray());
+            Assert.AreEqual(1, p.StackDepth);
+            Assert.AreEqual("b", p.CurrentProcedure);
+        }
+
+        [Test]
+        public void Update_OnlyTopOfStackReceives()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.AddProcedure("game", new StackProcedure(log, "game"));
+            p.AddProcedure("pause", new StackProcedure(log, "pause"));
+            p.Start("game");
+            p.Push("pause");
+            log.Clear();
+
+            p.Update(0.016f, 0.016f);
+
+            Assert.AreEqual(new[] { "update:pause" }, log.ToArray());
+        }
+
+        [Test]
+        public void Pop_EmptyStack_Throws()
+        {
+            var p = new ProcedureModule();
+            Assert.Throws<InvalidOperationException>(() => p.Pop());
+        }
+
+        [Test]
+        public void Push_NotStarted_Throws()
+        {
+            var p = new ProcedureModule();
+            p.AddProcedure("a", new StackProcedure(new List<string>(), "a"));
+            Assert.Throws<InvalidOperationException>(() => p.Push("a"));
+        }
+
+        [Test]
+        public void Stop_ExitsAllStackInReverseOrder()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.AddProcedure("a", new StackProcedure(log, "a"));
+            p.AddProcedure("b", new StackProcedure(log, "b"));
+            p.AddProcedure("c", new StackProcedure(log, "c"));
+            p.Start("a");
+            p.Push("b");
+            p.Push("c");
+            log.Clear();
+
+            p.Stop();
+
+            Assert.AreEqual(new[] { "exit:c", "exit:b", "exit:a" }, log.ToArray());
+            Assert.AreEqual(0, p.StackDepth);
+            Assert.IsFalse(p.IsRunning);
+        }
+
+        // 帮助类：在第 N 次 Update 时触发 Replace
         private class ConditionalTransition : ProcedureBase
         {
             private readonly string _name;
@@ -319,7 +464,7 @@ namespace TryGet.Tests
                 _log.Add($"update:{_name}");
                 _ticks++;
                 if (_ticks >= _triggerOnTick)
-                    m.TransitionTo(_target);
+                    m.Replace(_target);
             }
 
             public override void OnExit(IProcedureModule m) => _log.Add($"exit:{_name}");
