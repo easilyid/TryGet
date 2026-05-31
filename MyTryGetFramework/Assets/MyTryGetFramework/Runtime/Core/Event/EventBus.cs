@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace TryGet
 {
@@ -59,7 +60,7 @@ namespace TryGet
 
         public IReadOnlyList<Type> GetEventTypes()
         {
-            return new List<Type>(_handlers.Keys);
+            return _handlers.Keys.ToArray();
         }
 
         internal IReadOnlyList<Exception> GetLastPublishExceptions<T>() where T : struct

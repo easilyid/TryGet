@@ -260,5 +260,179 @@ namespace TryGet.Tests
                 public void UnsafeOnCompleted(Action c) => c?.Invoke();
             }
         }
+
+        // ============= V2.2 Phase-aware Tests =============
+
+        [Test]
+        public void Yield_WithPhase_LateUpdate_RunsInLateUpdate()
+        {
+            var host = new ModuleHost();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            bool executed = false;
+            AsyncYieldPhase(scheduler, FramePhase.LateUpdate, () => executed = true);
+
+            // EarlyUpdate, FixedUpdate, Update 都不应执行
+            host.EarlyUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            host.FixedUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            host.Update(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            // LateUpdate 应该执行
+            host.LateUpdate(0.016f, 0.016f);
+            Assert.IsTrue(executed);
+        }
+
+        [Test]
+        public void Yield_WithPhase_EndOfFrame_RunsInEndOfFrame()
+        {
+            var host = new ModuleHost();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            bool executed = false;
+            AsyncYieldPhase(scheduler, FramePhase.EndOfFrame, () => executed = true);
+
+            // 前面所有 Phase 都不应执行
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            host.Update(0.016f, 0.016f);
+            host.LateUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            // EndOfFrame 应该执行
+            host.EndOfFrame(0.016f, 0.016f);
+            Assert.IsTrue(executed);
+        }
+
+        [Test]
+        public void DelayUntilPhase_WaitsForTargetPhase()
+        {
+            var host = new ModuleHost();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            bool executed = false;
+            AsyncDelayUntilPhase(scheduler, FramePhase.LateUpdate, () => executed = true);
+
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            host.Update(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            host.LateUpdate(0.016f, 0.016f);
+            Assert.IsTrue(executed);
+        }
+
+        [Test]
+        public void Delay_WithPhase_RunsInSpecifiedPhase()
+        {
+            var host = new ModuleHost();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            bool executed = false;
+            AsyncDelayPhase(scheduler, 0.05f, FramePhase.FixedUpdate, () => executed = true);
+
+            // 第一帧：时间不够
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            // 第二帧：时间不够
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            // 第三帧：时间够了，在 FixedUpdate 执行
+            host.EarlyUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);  // EarlyUpdate 还不执行
+
+            host.FixedUpdate(0.016f, 0.016f);
+            Assert.IsTrue(executed);  // FixedUpdate 执行
+        }
+
+        [Test]
+        public void WaitForFrames_WithPhase_CountsFramesInThatPhase()
+        {
+            var host = new ModuleHost();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            bool executed = false;
+            AsyncWaitFramesPhase(scheduler, 2, FramePhase.EarlyUpdate, () => executed = true);
+
+            // 第一帧
+            host.EarlyUpdate(0.016f, 0.016f);
+            Assert.IsFalse(executed);
+
+            // 第二帧
+            host.EarlyUpdate(0.016f, 0.016f);
+            Assert.IsTrue(executed);
+        }
+
+        [Test]
+        public void MultiplePhases_IndependentQueues()
+        {
+            var host = new ModuleHost();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            bool earlyExecuted = false, updateExecuted = false, lateExecuted = false;
+
+            AsyncYieldPhase(scheduler, FramePhase.EarlyUpdate, () => earlyExecuted = true);
+            AsyncYieldPhase(scheduler, FramePhase.Update, () => updateExecuted = true);
+            AsyncYieldPhase(scheduler, FramePhase.LateUpdate, () => lateExecuted = true);
+
+            // 依次执行各 Phase
+            host.EarlyUpdate(0.016f, 0.016f);
+            Assert.IsTrue(earlyExecuted);
+            Assert.IsFalse(updateExecuted);
+            Assert.IsFalse(lateExecuted);
+
+            host.Update(0.016f, 0.016f);
+            Assert.IsTrue(updateExecuted);
+            Assert.IsFalse(lateExecuted);
+
+            host.LateUpdate(0.016f, 0.016f);
+            Assert.IsTrue(lateExecuted);
+        }
+
+        // ---- Phase-aware async helpers ----
+        private static async TGTask AsyncYieldPhase(ITGTaskScheduler scheduler, FramePhase phase, Action onReached)
+        {
+            await scheduler.Yield(phase);
+            onReached();
+        }
+
+        private static async TGTask AsyncDelayUntilPhase(ITGTaskScheduler scheduler, FramePhase phase, Action onReached)
+        {
+            await scheduler.DelayUntilPhase(phase);
+            onReached();
+        }
+
+        private static async TGTask AsyncDelayPhase(ITGTaskScheduler scheduler, float seconds, FramePhase phase, Action onReached)
+        {
+            await scheduler.Delay(seconds, phase);
+            onReached();
+        }
+
+        private static async TGTask AsyncWaitFramesPhase(ITGTaskScheduler scheduler, int frames, FramePhase phase, Action onReached)
+        {
+            await scheduler.WaitForFrames(frames, phase);
+            onReached();
+        }
     }
 }
+
