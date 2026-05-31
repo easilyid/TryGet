@@ -7,7 +7,7 @@ namespace TryGet
     public interface ILateUpdateModule : IModule
     {
         /// <summary>
-        /// 每帧由 ModuleHost.LateUpdate 调用，按 OnInit 顺序执行。
+        /// 每帧由 ModuleSystem.LateUpdate 调用，按 OnInit 顺序执行。
         /// 参数与 <see cref="IUpdateModule.Update"/> 对齐。
         /// </summary>
         /// <param name="deltaTime">受 timeScale 影响的帧间隔（秒）。</param>

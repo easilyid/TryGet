@@ -13,7 +13,7 @@ namespace TryGet
         public int Priority => -500;
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
 
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleSystem host) { }
 
         public void Shutdown()
         {

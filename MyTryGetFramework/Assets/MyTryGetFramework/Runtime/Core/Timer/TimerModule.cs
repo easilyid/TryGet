@@ -43,7 +43,7 @@ namespace TryGet
             }
         }
 
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleSystem host) { }
         public void Shutdown() { _entries.Clear(); }
 
         public TimerHandle Schedule(float seconds, Action callback) =>

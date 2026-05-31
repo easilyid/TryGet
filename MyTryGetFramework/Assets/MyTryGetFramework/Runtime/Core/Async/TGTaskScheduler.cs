@@ -23,6 +23,14 @@ namespace TryGet.Async
         private long _frameCount;
         private float _elapsedTime;
 
+        // 用于基于 Phase 顺序判断帧边界。
+        // 规则：
+        // - Early -> Fixed -> Update -> Late -> End 的完整单调序列里，只在第一个被调用的 Phase 里递增一次；
+        // - 同一 Phase 连续重复调用（例如测试直接多次调用 Update）视为进入新帧；
+        // - Phase 顺序回退或回到更早的 Phase（例如 EndOfFrame 后再次 Update）也视为进入新帧。
+        // 这样可以兼容完整帧、部分帧和重复 Update 调用，同时保持实现最小化。
+        private FramePhase _lastProcessedPhase = FramePhase.EndOfFrame;
+
         // Phase 队列：每个 Phase 维护独立的 Yield/Delay/FrameWait 队列
         private readonly Dictionary<FramePhase, YieldQueues> _yieldQueuesByPhase;
         private readonly Dictionary<FramePhase, List<DelayedEntry>> _delayQueuesByPhase;
@@ -34,9 +42,9 @@ namespace TryGet.Async
         /// 未观察到的 TGTask 异常的全局钩子。对标 UniTaskScheduler.UnobservedTaskException。
         ///
         /// 触发条件：<see cref="TGTask.Forget"/> 被调用后内部发生异常。
-        /// 用法：业务在 Bootstrap 时订阅，统一上报到 LogModule。
+        /// 用法：业务在 GameLauncher 时订阅，统一上报到 LogModule。
         ///
-        /// 静态事件 — 全局唯一，跨多 ModuleHost 实例共享（与 .NET TaskScheduler.UnobservedTaskException 一致）。
+        /// 静态事件 — 全局唯一，跨多 ModuleSystem 实例共享（与 .NET TaskScheduler.UnobservedTaskException 一致）。
         /// </summary>
         public static event Action<Exception> UnobservedException;
 
@@ -93,7 +101,7 @@ namespace TryGet.Async
 
         // ============= IModule =============
 
-        public void OnInit(IModuleHost host)
+        public void OnInit(IModuleSystem host)
         {
             // 无依赖；保持空实现
         }
@@ -123,6 +131,7 @@ namespace TryGet.Async
 
             _elapsedTime = 0;
             _frameCount = 0;
+            _lastProcessedPhase = FramePhase.EndOfFrame;
         }
 
         // ============= 公共 API =============
@@ -217,8 +226,16 @@ namespace TryGet.Async
 
         private void ProcessPhase(FramePhase phase, float deltaTime)
         {
-            _frameCount++;
-            _elapsedTime += deltaTime;
+            // 以 Phase 顺序判断帧边界：
+            // - 完整帧循环中 Phase 单调递增，只在 EarlyUpdate 递增一次。
+            // - 直接重复调用同一 Phase（如测试直接调用 Update）视为每次进入新帧。
+            // - Phase 顺序回退（如 EndOfFrame 后再次 Update）视为新帧。
+            if (phase <= _lastProcessedPhase)
+            {
+                _frameCount++;
+                _elapsedTime += deltaTime;
+            }
+            _lastProcessedPhase = phase;
 
             // 1. 处理 Yield 队列
             ProcessYieldQueue(phase);

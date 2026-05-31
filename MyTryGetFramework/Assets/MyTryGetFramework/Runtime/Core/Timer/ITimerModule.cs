@@ -3,7 +3,7 @@ using System;
 namespace TryGet
 {
     /// <summary>
-    /// 定时器服务契约（Common Module）。基于 ModuleHost.Update 累计 deltaTime 驱动，跨端可用。
+    /// 定时器服务契约（Common Module）。基于 ModuleSystem.Update 累计 deltaTime 驱动，跨端可用。
     ///
     /// 取消：cancel 已触发的 handle 返回 false，cancel 未触发的 handle 返回 true。
     /// 时间基准：默认走 scaled deltaTime（受 timeScale 影响），可通过 <see cref="ScheduleUnscaled"/> 走 unscaled。

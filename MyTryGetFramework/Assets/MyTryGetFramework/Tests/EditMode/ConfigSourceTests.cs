@@ -216,9 +216,9 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void Loader_ModuleHost_Integration()
+        public void Loader_ModuleSystem_Integration()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var src = new MemoryConfigSource();
             src.SetRaw("w1", SerializeWeapon(new WeaponConfig { Name = "sword", Atk = 100 }));
             host.Register<IConfigSource>(src);

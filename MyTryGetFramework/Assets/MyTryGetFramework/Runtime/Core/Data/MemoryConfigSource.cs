@@ -19,7 +19,7 @@ namespace TryGet
         public int Count => _data.Count;
         public IEnumerable<string> ConfigIds => _data.Keys;
 
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleSystem host) { }
         public void Shutdown() { _data.Clear(); }
 
         public bool Has(string configId)

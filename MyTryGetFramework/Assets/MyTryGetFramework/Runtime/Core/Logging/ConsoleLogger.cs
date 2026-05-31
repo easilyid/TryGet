@@ -25,7 +25,7 @@ namespace TryGet
         /// <summary>是否把每条日志保存到内存（便于测试断言）。默认 false。</summary>
         public bool CaptureToMemory { get; set; }
 
-        public void OnInit(IModuleHost host) { _shutdown = false; }
+        public void OnInit(IModuleSystem host) { _shutdown = false; }
 
         public void Shutdown() { _captured.Clear(); OnLog = null; _shutdown = true; }
 

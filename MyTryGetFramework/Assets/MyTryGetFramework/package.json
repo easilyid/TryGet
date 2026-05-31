@@ -1,0 +1,22 @@
+{
+  "name": "com.easilyid.tryget",
+  "version": "2.0.0",
+  "displayName": "TryGet Framework",
+  "description": "纯客户端 Unity 框架：ModuleHost 服务容器 / FrameLoop 多阶段调度 / 自研 TGTask 异步原语 / Procedure Stack 流程管理 / Source Generator 自动注册",
+  "unity": "6000.0",
+  "keywords": [
+    "framework",
+    "gameplay",
+    "module",
+    "task-scheduler",
+    "source-generator",
+    "procedure",
+    "event-bus"
+  ],
+  "author": {
+    "name": "easilyid",
+    "url": "https://github.com/easilyid"
+  },
+  "dependencies": {},
+  "type": "library"
+}

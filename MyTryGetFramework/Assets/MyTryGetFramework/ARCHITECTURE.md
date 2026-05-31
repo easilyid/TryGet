@@ -16,15 +16,15 @@ Assets/MyTryGetFramework/
 │   │   ├── Assembly/                             # 程序集级配置
 │   │   │   └── AssemblyInfo.cs                   # InternalsVisibleTo Tests
 │   │   ├── Event/                                # 事件系统
-│   │   │   ├── EventBus.cs                       # IEventBus 默认实现（V2.1 零 GC 派发）
-│   │   │   ├── IEventBus.cs / IEventScope.cs / EventBusScopeExtensions.cs
+│   │   │   ├── EventModule.cs                    # IEventModule 默认实现（V2.1 零 GC 派发）
+│   │   │   ├── IEventModule.cs / IEventScope.cs / EventModuleScopeExtensions.cs
 │   │   │   └── EventHandlerAttribute.cs / EventHandlerRegistry.cs
 │   │   ├── Module/                               # 框架骨架 / 启动 / 模块注册
 │   │   │   ├── IModule.cs / IUpdateModule.cs / ILateUpdateModule.cs
 │   │   │   ├── IEarlyUpdateModule.cs / IFixedUpdateModule.cs / IEndOfFrameModule.cs / FramePhase.cs  # V2.2 多阶段 Update
-│   │   │   ├── IModuleHost.cs / ModuleHost.cs
-│   │   │   ├── Bootstrap.cs / BootstrapOptions.cs
-│   │   │   ├── ModuleAttribute.cs / AssemblyManifestRegistry.cs
+│   │   │   ├── IModuleSystem.cs / ModuleSystem.cs
+│   │   │   ├── GameLauncher.cs / LauncherOptions.cs
+│   │   │   ├── ModuleAttribute.cs / ModuleRegistry.cs
 │   │   │   └── ModuleExceptions.cs
 │   │   ├── Async/                                # 异步原语（自研，零外部依赖）
 │   │   │   ├── TGTask.cs / TGTaskBody.cs / TGTaskCompletionSource.cs
@@ -61,13 +61,13 @@ Assets/MyTryGetFramework/
 ## V2.0 核心骨架
 
 ```
-ModuleHost (框架根)
+ModuleSystem (框架根容器)
 ├── ILogger                — 日志
 ├── IClock                 — 时间（DeltaTime / ElapsedTime / FrameCount）
 ├── ITimerModule           — 定时器
 ├── IPoolModule            — 对象池
 ├── ITGTaskScheduler       — 异步调度
-├── IEventBus              — 全局事件（泛型 struct，类型安全；V2.1 稳态 Publish 零 GC + 重入安全 + handler 异常隔离）
+├── IEventModule           — 全局事件（泛型 struct，类型安全；V2.1 稳态 Publish 零 GC + 重入安全 + handler 异常隔离）
 ├── IProcedureModule       — 流程管理（Stack 模式 ★ V2.0 新增）
 │   ├── Push / Pop / Replace / StackDepth
 │   └── IProcedure: OnEnter / OnExit / OnPause / OnResume / OnUpdate
@@ -77,10 +77,10 @@ ModuleHost (框架根)
 └── INetClient (业务层 Adapter 实现)
 
 Source Generator:
-├── [Module]               — 自动注册到 AssemblyManifestRegistry
-└── [EventHandler]         — 自动订阅到 EventBus
+├── [Module]               — 自动注册到 ModuleRegistry
+└── [EventHandler]         — 自动订阅到 EventModule
 
-Bootstrap:
+GameLauncher:
 └── CreateHost(options)    — 标准化启动 + 拓扑排序 OnInit
 ```
 
@@ -116,14 +116,16 @@ proc.Pop();                  // 栈: [Gameplay]
 | `Replace("C")` | [A, B] → [A, C] | B.OnExit + C.OnEnter |
 | `Stop()` | [A, B, C] → [] | C/B/A.OnExit（逆序） |
 
-## 双端门（V0.2 落地，V2.0 持续验证）
+## 双端门（ADR-0012 规划保留，物理未落地）
 
 ```
 ServerProject/MyTryGetFramework.Core/
-└── MyTryGetFramework.Core.csproj  # netstandard2.1，反向引用 Core/**/*.cs
+└── MyTryGetFramework.Core.csproj  # netstandard2.1，反向引用 Core/**/*.cs（待实现）
 ```
 
-`dotnet build` 持续验证 Core 不含 UnityEngine。Adapter 层（Runtime/Unity/）不参与跨端编译。
+**当前状态**：Core asmdef 已设置 `noEngineReferences: true` 在编译期物理禁止引用 UnityEngine，但独立的 netstandard2.1 csproj 与 `dotnet build` CI 门尚未建立。现有 `MyTryGetFramework.Core.csproj` 是 Unity/Rider 自动生成的 IDE 影子工程（v4.7.1，含 UNITY_* 宏），不是双端验证用的手写 csproj。
+
+ADR-0012 决策保留为"门保留"（V2.0 纯客户端阶段不引入服务端业务代码），待后续补齐真实 ServerProject 手写 csproj 实现双端编译验证。
 
 ## 核心 ADR 索引
 
@@ -136,7 +138,7 @@ ServerProject/MyTryGetFramework.Core/
 | 0009 | Query All-of + None-of | **Superseded by ADR-0020** |
 | 0010 | Entity-level + World-level Event | **Superseded by ADR-0020**（仅保留全局 IEventBus） |
 | 0011 | ModuleHost + IModule 契约 | V0.2 落地，V2.0 继续有效 |
-| 0012 | Shadow csproj 双端编译 | V0.2 落地，V2.0 继续有效 |
+| 0012 | Shadow csproj 双端编译 | 规划保留（Core noEngineReferences 已落地，独立 csproj 待补） |
 | 0013-0019 | 已被 ADR-0020 整体取代 | **Superseded by ADR-0020** |
 | **0020** | **路线 C 重定向：纯客户端服务框架** | **V2.0 落地** |
 
@@ -188,4 +190,4 @@ host.Shutdown();
 - hsenl（IPlug 横切，V2.0 决定不引入）
 - Fantasy（Source Generator 自动注册）
 
-详见 `docs/design/V2.0-route-C-prd.md`（V2.0 PRD）和 `docs/adr/0020-route-c-pivot.md`（路线重定向决策）。
+详见 `.scratch/` 目录下的设计文档（V2.0 PRD 与路线重定向决策分析）。

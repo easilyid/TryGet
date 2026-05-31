@@ -139,9 +139,9 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void Memory_ModuleHost_Integration()
+        public void Memory_ModuleSystem_Integration()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Register<IKVStore>(new MemoryKVStore());
             host.Initialize();
 

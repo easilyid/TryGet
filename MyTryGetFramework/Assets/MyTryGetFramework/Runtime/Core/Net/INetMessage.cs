@@ -14,8 +14,8 @@ namespace TryGet
     /// - Core 不提供具体序列化；序列化由 Adapter（MemoryPack / Protobuf 等）实现
     /// - Core 仅定义客户端消息边界，不包含服务端连接模型
     ///
-    /// 与 <see cref="IEventBus"/> 事件的区别：
-    /// - <see cref="IEventBus"/> 事件 = 进程内模块通信
+    /// 与 <see cref="IEventModule"/> 事件的区别：
+    /// - <see cref="IEventModule"/> 事件 = 进程内模块通信
     /// - <see cref="INetMessage"/> = 网络通信载荷，必须由 Adapter 可序列化
     /// </summary>
     public interface INetMessage { }

@@ -36,13 +36,13 @@ namespace TryGet
         /// <summary>累计 unscaled 已运行秒数（自 Initialize 起每帧累加 <see cref="UnscaledDeltaTime"/>）。</summary>
         double UnscaledElapsedTime { get; }
 
-        /// <summary>累计帧数（从 0 开始；<see cref="IModuleHost.Update"/> 每次调用 +1）。</summary>
+        /// <summary>累计帧数（从 0 开始；<see cref="IModuleSystem.Update"/> 每次调用 +1）。</summary>
         long FrameCount { get; }
     }
 
     /// <summary>
     /// <see cref="IClock"/> 的 Net / Headless 默认实现：
-    /// 不读 <c>UnityEngine.Time</c>，由 <see cref="IModuleHost.Update"/> 在每帧把 dt 喂进来。
+    /// 不读 <c>UnityEngine.Time</c>，由 <see cref="IModuleSystem.Update"/> 在每帧把 dt 喂进来。
     ///
     /// Priority=-900：在 <see cref="ConsoleLogger"/>（V0.7 Iter 2，Priority=-1000）之后，
     /// 在 <see cref="ITGTaskScheduler"/>（-150）/ <see cref="IProcedureModule"/>（-200）等业务 Module 之前。
@@ -59,7 +59,7 @@ namespace TryGet
         public double UnscaledElapsedTime { get; private set; }
         public long FrameCount { get; private set; }
 
-        public void OnInit(IModuleHost host) { /* 无依赖 */ }
+        public void OnInit(IModuleSystem host) { /* 无依赖 */ }
 
         public void Shutdown()
         {

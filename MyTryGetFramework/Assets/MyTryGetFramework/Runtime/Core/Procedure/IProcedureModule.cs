@@ -13,7 +13,7 @@ namespace TryGet
         string CurrentProcedure { get; }
         bool IsRunning { get; }
         int StackDepth { get; }
-        IModuleHost Host { get; }
+        IModuleSystem Host { get; }
 
         void AddProcedure(string id, IProcedure procedure);
         void Start(string initial);

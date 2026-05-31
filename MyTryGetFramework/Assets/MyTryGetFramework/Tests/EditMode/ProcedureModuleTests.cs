@@ -273,10 +273,10 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void IntegratesWithModuleHost()
+        public void IntegratesWithModuleSystem()
         {
-            // ModuleHost 驱动 ProcedureModule.Update
-            var host = new ModuleHost();
+            // ModuleSystem 驱动 ProcedureModule.Update
+            var host = new ModuleSystem();
             var pm = new ProcedureModule();
             var log = new List<string>();
             pm.AddProcedure("boot", new TracingProcedure(log, "boot"));

@@ -20,7 +20,7 @@ namespace TryGet
         public int LoadedCount => _assets.Count;
         public IEnumerable<string> LoadedPaths => _assets.Keys;
 
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleSystem host) { }
         public void Shutdown() { _assets.Clear(); }
 
         public bool IsLoaded(string path)

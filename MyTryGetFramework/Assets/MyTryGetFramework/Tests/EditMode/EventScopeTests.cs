@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace TryGet.Tests
 {
     /// <summary>
-    /// IEventScope / EventScope / EventBus scope 扩展测试。
+    /// IEventScope / EventScope / EventModule scope 扩展测试。
     /// </summary>
     [TestFixture]
     public class EventScopeTests
@@ -99,20 +99,20 @@ namespace TryGet.Tests
                 "throw 的 unsubscriber 应被吞，前面已 Register 的 unsubscriber 继续跑");
         }
 
-        // ===== IEventBus 集成 =====
+        // ===== IEventModule 集成 =====
 
         [Test]
-        public void EventBus_Subscribe_WithScope_HandlerReceivesEvent()
+        public void EventModule_Subscribe_WithScope_HandlerReceivesEvent()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             int received = 0;
-            using (var scope = host.EventBus.CreateScope())
+            using (var scope = host.EventModule.CreateScope())
             {
-                host.EventBus.Subscribe<TestEvent>(e => received = e.Value, scope);
+                host.EventModule.Subscribe<TestEvent>(e => received = e.Value, scope);
 
-                host.EventBus.Publish(new TestEvent { Value = 42 });
+                host.EventModule.Publish(new TestEvent { Value = 42 });
                 Assert.AreEqual(42, received);
             }
 
@@ -120,44 +120,44 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void EventBus_ScopeDispose_HandlerNoLongerCalled()
+        public void EventModule_ScopeDispose_HandlerNoLongerCalled()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             int callCount = 0;
-            var scope = host.EventBus.CreateScope();
-            host.EventBus.Subscribe<TestEvent>(_ => callCount++, scope);
+            var scope = host.EventModule.CreateScope();
+            host.EventModule.Subscribe<TestEvent>(_ => callCount++, scope);
 
-            host.EventBus.Publish(new TestEvent { Value = 1 });
+            host.EventModule.Publish(new TestEvent { Value = 1 });
             Assert.AreEqual(1, callCount);
 
             scope.Dispose();
-            host.EventBus.Publish(new TestEvent { Value = 2 });
+            host.EventModule.Publish(new TestEvent { Value = 2 });
             Assert.AreEqual(1, callCount, "scope.Dispose 后 handler 不应再被触发");
 
             host.Shutdown();
         }
 
         [Test]
-        public void EventBus_MultipleScopes_IsolatedDispose()
+        public void EventModule_MultipleScopes_IsolatedDispose()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             int countA = 0, countB = 0;
-            var scopeA = host.EventBus.CreateScope();
-            var scopeB = host.EventBus.CreateScope();
+            var scopeA = host.EventModule.CreateScope();
+            var scopeB = host.EventModule.CreateScope();
 
-            host.EventBus.Subscribe<TestEvent>(_ => countA++, scopeA);
-            host.EventBus.Subscribe<TestEvent>(_ => countB++, scopeB);
+            host.EventModule.Subscribe<TestEvent>(_ => countA++, scopeA);
+            host.EventModule.Subscribe<TestEvent>(_ => countB++, scopeB);
 
-            host.EventBus.Publish(new TestEvent());
+            host.EventModule.Publish(new TestEvent());
             Assert.AreEqual(1, countA);
             Assert.AreEqual(1, countB);
 
             scopeA.Dispose();
-            host.EventBus.Publish(new TestEvent());
+            host.EventModule.Publish(new TestEvent());
             Assert.AreEqual(1, countA, "scopeA Dispose 后 A handler 不再触发");
             Assert.AreEqual(2, countB, "scopeB 不受影响");
 
@@ -166,25 +166,25 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void EventBus_MixedEventTypes_OneScope()
+        public void EventModule_MixedEventTypes_OneScope()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             int testCount = 0, anotherCount = 0;
-            using (var scope = host.EventBus.CreateScope())
+            using (var scope = host.EventModule.CreateScope())
             {
-                host.EventBus.Subscribe<TestEvent>(_ => testCount++, scope);
-                host.EventBus.Subscribe<AnotherEvent>(_ => anotherCount++, scope);
+                host.EventModule.Subscribe<TestEvent>(_ => testCount++, scope);
+                host.EventModule.Subscribe<AnotherEvent>(_ => anotherCount++, scope);
 
-                host.EventBus.Publish(new TestEvent());
-                host.EventBus.Publish(new AnotherEvent());
+                host.EventModule.Publish(new TestEvent());
+                host.EventModule.Publish(new AnotherEvent());
                 Assert.AreEqual(1, testCount);
                 Assert.AreEqual(1, anotherCount);
             }
 
-            host.EventBus.Publish(new TestEvent());
-            host.EventBus.Publish(new AnotherEvent());
+            host.EventModule.Publish(new TestEvent());
+            host.EventModule.Publish(new AnotherEvent());
             Assert.AreEqual(1, testCount, "Dispose 后两种事件都不再触发");
             Assert.AreEqual(1, anotherCount);
 
@@ -192,18 +192,18 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void EventBus_Subscribe_NullArgs_Throw()
+        public void EventModule_Subscribe_NullArgs_Throw()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             var scope = new EventScope();
             Assert.Throws<ArgumentNullException>(
-                () => EventBusScopeExtensions.Subscribe<TestEvent>(null, _ => { }, scope));
+                () => EventModuleScopeExtensions.Subscribe<TestEvent>(null, _ => { }, scope));
             Assert.Throws<ArgumentNullException>(
-                () => host.EventBus.Subscribe<TestEvent>(null, scope));
+                () => host.EventModule.Subscribe<TestEvent>(null, scope));
             Assert.Throws<ArgumentNullException>(
-                () => host.EventBus.Subscribe<TestEvent>(_ => { }, null));
+                () => host.EventModule.Subscribe<TestEvent>(_ => { }, null));
 
             host.Shutdown();
         }
@@ -211,22 +211,22 @@ namespace TryGet.Tests
         [Test]
         public void SingleScopeDispose_UnsubscribesMultipleBusHandlers()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             int testCount = 0, anotherCount = 0;
             var scope = new EventScope();
-            host.EventBus.Subscribe<TestEvent>(_ => testCount++, scope);
-            host.EventBus.Subscribe<AnotherEvent>(_ => anotherCount++, scope);
+            host.EventModule.Subscribe<TestEvent>(_ => testCount++, scope);
+            host.EventModule.Subscribe<AnotherEvent>(_ => anotherCount++, scope);
 
-            host.EventBus.Publish(new TestEvent());
-            host.EventBus.Publish(new AnotherEvent());
+            host.EventModule.Publish(new TestEvent());
+            host.EventModule.Publish(new AnotherEvent());
             Assert.AreEqual(1, testCount);
             Assert.AreEqual(1, anotherCount);
 
             scope.Dispose();
-            host.EventBus.Publish(new TestEvent());
-            host.EventBus.Publish(new AnotherEvent());
+            host.EventModule.Publish(new TestEvent());
+            host.EventModule.Publish(new AnotherEvent());
             Assert.AreEqual(1, testCount);
             Assert.AreEqual(1, anotherCount);
 
@@ -236,18 +236,18 @@ namespace TryGet.Tests
         [Test]
         public void SubscribeWithDisposedScope_DoesNotLeaveHandler()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Initialize();
 
             int callCount = 0;
-            var scope = host.EventBus.CreateScope();
+            var scope = host.EventModule.CreateScope();
             scope.Dispose();
 
-            host.EventBus.Subscribe<TestEvent>(_ => callCount++, scope);
-            host.EventBus.Publish(new TestEvent());
+            host.EventModule.Subscribe<TestEvent>(_ => callCount++, scope);
+            host.EventModule.Publish(new TestEvent());
 
             Assert.AreEqual(0, callCount, "已 Dispose 的 scope 下订阅不应残留 handler");
-            Assert.AreEqual(0, host.EventBus.GetSubscriberCount<TestEvent>());
+            Assert.AreEqual(0, host.EventModule.GetSubscriberCount<TestEvent>());
 
             host.Shutdown();
         }

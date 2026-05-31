@@ -5,7 +5,7 @@ namespace TryGet.Async
     ///
     /// V2.2+ 支持 Phase-aware 调度：可指定在哪个 FramePhase 恢复异步操作。
     ///
-    /// 实现为 <see cref="IModule"/> + 5 个 Update 接口：注册到 <see cref="IModuleHost"/> 后，
+    /// 实现为 <see cref="IModule"/> + 5 个 Update 接口：注册到 <see cref="IModuleSystem"/> 后，
     /// 每帧由 host 驱动所有 Phase 的 Update 方法检查到期任务。
     ///
     /// 单线程模型：所有 API 必须在主线程调用。

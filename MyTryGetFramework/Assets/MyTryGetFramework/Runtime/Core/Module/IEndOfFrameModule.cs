@@ -6,7 +6,7 @@ namespace TryGet
     public interface IEndOfFrameModule : IModule
     {
         /// <summary>
-        /// 每帧由 ModuleHost.EndOfFrame 调用，按 OnInit 顺序执行。
+        /// 每帧由 ModuleSystem.EndOfFrame 调用，按 OnInit 顺序执行。
         /// </summary>
         /// <param name="deltaTime">受 timeScale 影响的帧间隔（秒）。</param>
         /// <param name="unscaledDeltaTime">不受 timeScale 影响的帧间隔（秒）。</param>

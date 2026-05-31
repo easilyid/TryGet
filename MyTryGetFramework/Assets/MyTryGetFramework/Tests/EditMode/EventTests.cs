@@ -4,7 +4,7 @@ using NUnit.Framework;
 namespace TryGet.Tests
 {
     /// <summary>
-    /// IEventBus 全局事件测试。
+    /// IEventModule 全局事件测试。
     /// </summary>
     [TestFixture]
     public class EventTests
@@ -27,7 +27,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_SubscriberReceivesEvent()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int received = 0;
 
             bus.Subscribe<DamageEvent>(evt => { received = evt.Amount; });
@@ -39,7 +39,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_UnsubscribedHandler_NotCalled()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int callCount = 0;
 
             void Handler(DamageEvent evt) => callCount++;
@@ -54,7 +54,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_MultipleSubscribers_AllReceive()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int count1 = 0, count2 = 0;
 
             bus.Subscribe<SpawnEvent>(_ => count1++);
@@ -68,7 +68,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_InvokesInSubscribeOrder()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             string order = string.Empty;
 
             bus.Subscribe<DamageEvent>(_ => order += "A");
@@ -83,7 +83,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_NoSubscribers_NoOp()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
 
             Assert.DoesNotThrow(() => bus.Publish(new DamageEvent { Amount = 1 }));
         }
@@ -91,7 +91,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_DifferentEventTypes_AreIsolated()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int damageCount = 0;
             int spawnCount = 0;
 
@@ -107,7 +107,7 @@ namespace TryGet.Tests
         [Test]
         public void Subscribe_DuplicateHandler_Throws()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
 
             void Handler(DamageEvent evt) { }
 
@@ -119,7 +119,7 @@ namespace TryGet.Tests
         [Test]
         public void Unsubscribe_NullOrMissing_NoOp()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
 
             Assert.DoesNotThrow(() => bus.Unsubscribe<DamageEvent>(null));
 
@@ -130,7 +130,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_UnsubscribeDuringDispatch_AffectsNextPublishOnly()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int firstCount = 0;
             int secondCount = 0;
 
@@ -158,7 +158,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_SubscribeDuringDispatch_AffectsNextPublishOnly()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int firstCount = 0;
             int secondCount = 0;
 
@@ -186,7 +186,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_NestedPublish_PendingChangesFlushAtSafeBoundary()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int firstCount = 0;
             int secondCount = 0;
             int nestedCount = 0;
@@ -229,7 +229,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_UnsubscribeThenResubscribeDuringDispatch_AffectsNextPublishOnly()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int callCount = 0;
 
             void Handler(DamageEvent evt)
@@ -251,7 +251,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_LastHandlerUnsubscribesDuringDispatch_RemovesEventTypeFromDiagnostics()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
 
             void Handler(DamageEvent evt)
             {
@@ -268,7 +268,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_NestedPublish_AccumulatesExceptionsUntilOuterBoundary()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             bool nestedPublished = false;
 
             void First(DamageEvent evt)
@@ -298,7 +298,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_HandlerThrows_ContinuesAndReports()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int callCount = 0;
 
             bus.Subscribe<DamageEvent>(_ => throw new InvalidOperationException("boom"));
@@ -313,7 +313,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_HandlerThrows_PendingChangesStillFlush()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int secondCount = 0;
             int thirdCount = 0;
 
@@ -342,7 +342,7 @@ namespace TryGet.Tests
         [Test]
         public void Publish_SteadyState_DoesNotAllocateSnapshot()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
             int count = 0;
             bus.Subscribe<DamageEvent>(_ => count++);
             bus.Subscribe<DamageEvent>(_ => count++);
@@ -361,7 +361,7 @@ namespace TryGet.Tests
         [Test]
         public void Diagnostics_ReportSubscriberCountsAndEventTypes()
         {
-            var bus = new EventBus();
+            var bus = new EventModule();
 
             bus.Subscribe<DamageEvent>(_ => { });
             bus.Subscribe<SpawnEvent>(_ => { });
@@ -376,7 +376,7 @@ namespace TryGet.Tests
         public void EventHandlerRegistry_Snapshot_ReturnsRegisteredHandlers()
         {
             EventHandlerRegistry.ClearForTests();
-            Action<IEventBus> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
+            Action<IEventModule> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
 
             EventHandlerRegistry.Register(registration);
 
@@ -390,7 +390,7 @@ namespace TryGet.Tests
         public void EventHandlerRegistry_Register_AllowsLegacyDuplicates()
         {
             EventHandlerRegistry.ClearForTests();
-            Action<IEventBus> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
+            Action<IEventModule> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
 
             EventHandlerRegistry.Register(registration);
             EventHandlerRegistry.Register(registration);
@@ -404,7 +404,7 @@ namespace TryGet.Tests
         public void EventHandlerRegistry_ApplyAll_FailFastByDefault()
         {
             EventHandlerRegistry.ClearForTests();
-            var bus = new EventBus();
+            var bus = new EventModule();
             int applied = 0;
 
             EventHandlerRegistry.Register(_ => throw new InvalidOperationException("boom"));

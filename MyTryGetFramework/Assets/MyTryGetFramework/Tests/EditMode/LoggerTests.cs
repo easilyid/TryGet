@@ -102,7 +102,7 @@ namespace TryGet.Tests
         [Test]
         public void ConsoleLogger_RegisteredAsILogger_RetrievableFromHost()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var logger = new ConsoleLogger();
             host.Register<ILogger>(logger);
             host.Initialize();

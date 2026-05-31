@@ -85,9 +85,9 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void ModuleHost_RegisterAndDrive()
+        public void ModuleSystem_RegisterAndDrive()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Register<IClock>(new SystemClock());
             host.Initialize();
 
@@ -108,12 +108,12 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void ModuleHost_SystemClockPriority_BeforeOtherUpdateModules()
+        public void ModuleSystem_SystemClockPriority_BeforeOtherUpdateModules()
         {
             // SystemClock.Priority=-900 应早于业务 Module Update。
             // 验证：注册一个 sentinel Module，sentinel 在 Update 时读 clock.FrameCount，
             // 应能读到 +1 后的最新值（说明 clock 已 Update 完）。
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var sentinel = new FrameCountSentinel();
             host.Register<IClock>(new SystemClock());
             host.Register<IFrameCountSentinel>(sentinel);
@@ -142,7 +142,7 @@ namespace TryGet.Tests
             public long LastObservedFrameCount { get; private set; }
             private IClock _clock;
 
-            public void OnInit(IModuleHost host) { _clock = host.Get<IClock>(); }
+            public void OnInit(IModuleSystem host) { _clock = host.Get<IClock>(); }
             public void Shutdown() { _clock = null; LastObservedFrameCount = 0; }
             public void Update(float dt, float udt) { LastObservedFrameCount = _clock.FrameCount; }
         }

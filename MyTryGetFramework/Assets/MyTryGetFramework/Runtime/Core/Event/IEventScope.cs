@@ -36,7 +36,7 @@ namespace TryGet
         public bool IsDisposed { get; private set; }
 
         /// <summary>
-        /// 框架内部：在订阅时注册"解绑动作"。<see cref="IEventBus"/> 的 scope 扩展方法调用。
+        /// 框架内部：在订阅时注册"解绑动作"。<see cref="IEventModule"/> 的 scope 扩展方法调用。
         /// 业务不应直接调用。
         /// </summary>
         public void Register(Action unsubscriber)

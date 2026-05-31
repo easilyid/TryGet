@@ -13,7 +13,7 @@ namespace TryGet.Tests
         [Test]
         public void WaitAsync_OneSecond_CompletesAfterAccumulatedDt()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var timer = new TimerModule();
             host.Register<ITimerModule>(timer);
             host.Initialize();
@@ -47,7 +47,7 @@ namespace TryGet.Tests
         [Test]
         public void WaitUnscaledAsync_Works()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var timer = new TimerModule();
             host.Register<ITimerModule>(timer);
             host.Initialize();
@@ -62,7 +62,7 @@ namespace TryGet.Tests
         [Test]
         public void AsyncTGTask_AwaitingTimer_ResumesAfterTimer()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var timer = new TimerModule();
             host.Register<ITimerModule>(timer);
             host.Initialize();

@@ -210,9 +210,9 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void IntegratesWithModuleHost()
+        public void IntegratesWithModuleSystem()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var pools = new PoolModule();
             host.Register<IPoolModule>(pools);
             host.Initialize();

@@ -215,9 +215,9 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void IntegratesWithModuleHost_UpdateDrivesTimers()
+        public void IntegratesWithModuleSystem_UpdateDrivesTimers()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var timer = new TimerModule();
             host.Register<ITimerModule>(timer);
             host.Initialize();

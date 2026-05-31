@@ -153,9 +153,9 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public void ModuleHost_RegistersAndDrives()
+        public void ModuleSystem_RegistersAndDrives()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Register<ITGTaskScheduler>(new TGTaskScheduler());
             host.Initialize();
 
@@ -266,7 +266,7 @@ namespace TryGet.Tests
         [Test]
         public void Yield_WithPhase_LateUpdate_RunsInLateUpdate()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var scheduler = new TGTaskScheduler();
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
@@ -292,7 +292,7 @@ namespace TryGet.Tests
         [Test]
         public void Yield_WithPhase_EndOfFrame_RunsInEndOfFrame()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var scheduler = new TGTaskScheduler();
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
@@ -315,7 +315,7 @@ namespace TryGet.Tests
         [Test]
         public void DelayUntilPhase_WaitsForTargetPhase()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var scheduler = new TGTaskScheduler();
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
@@ -335,7 +335,7 @@ namespace TryGet.Tests
         [Test]
         public void Delay_WithPhase_RunsInSpecifiedPhase()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var scheduler = new TGTaskScheduler();
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
@@ -364,7 +364,7 @@ namespace TryGet.Tests
         [Test]
         public void WaitForFrames_WithPhase_CountsFramesInThatPhase()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var scheduler = new TGTaskScheduler();
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
@@ -384,7 +384,7 @@ namespace TryGet.Tests
         [Test]
         public void MultiplePhases_IndependentQueues()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             var scheduler = new TGTaskScheduler();
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
@@ -407,6 +407,100 @@ namespace TryGet.Tests
 
             host.LateUpdate(0.016f, 0.016f);
             Assert.IsTrue(lateExecuted);
+        }
+
+        [Test]
+        public void WaitForFrames_MultiplePhases_DoesNotCountMultipleTimes()
+        {
+            // 验证修复：一帧内调用多个 Phase 不会让 frameCount 重复递增
+            var host = new ModuleSystem();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            var task = scheduler.WaitForFrames(1);
+
+            // 第一帧：调用所有 5 个 Phase
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            host.Update(0.016f, 0.016f);
+            host.LateUpdate(0.016f, 0.016f);
+            host.EndOfFrame(0.016f, 0.016f);
+
+            // 任务不应在第一帧完成（frameCount 应该只 +1，不是 +5）
+            Assert.IsFalse(task.IsCompleted, "WaitForFrames(1) should not complete in the same frame");
+
+            // 第二帧：再次调用所有 Phase
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            host.Update(0.016f, 0.016f);
+            host.LateUpdate(0.016f, 0.016f);
+            host.EndOfFrame(0.016f, 0.016f);
+
+            // 现在应该完成（frameCount = 2）
+            Assert.IsTrue(task.IsCompleted, "WaitForFrames(1) should complete after 1 full frame");
+        }
+
+        [Test]
+        public void Delay_MultiplePhases_DoesNotAccumulateMultipleTimes()
+        {
+            // 验证修复：一帧内调用多个 Phase 不会让 elapsedTime 累加多次
+            var host = new ModuleSystem();
+            var scheduler = new TGTaskScheduler();
+            host.Register<ITGTaskScheduler>(scheduler);
+            host.Initialize();
+
+            var task = scheduler.Delay(0.1f);  // 100ms
+
+            // 第一帧：调用所有 5 个 Phase，每个传入 0.016f (16ms)
+            host.EarlyUpdate(0.016f, 0.016f);
+            host.FixedUpdate(0.016f, 0.016f);
+            host.Update(0.016f, 0.016f);
+            host.LateUpdate(0.016f, 0.016f);
+            host.EndOfFrame(0.016f, 0.016f);
+
+            // 任务不应完成（elapsedTime 应该只 +16ms，不是 +80ms）
+            Assert.IsFalse(task.IsCompleted, "Delay(0.1f) should not complete after 16ms");
+
+            // 再调用 6 帧（每帧 16ms × 6 = 96ms，总计 112ms）
+            for (int i = 0; i < 6; i++)
+            {
+                host.EarlyUpdate(0.016f, 0.016f);
+                host.FixedUpdate(0.016f, 0.016f);
+                host.Update(0.016f, 0.016f);
+                host.LateUpdate(0.016f, 0.016f);
+                host.EndOfFrame(0.016f, 0.016f);
+            }
+
+            // 现在应该完成（总时间 = 7 × 16ms = 112ms > 100ms）
+            Assert.IsTrue(task.IsCompleted, "Delay(0.1f) should complete after 112ms");
+        }
+
+        [Test]
+        public void ProcessPhase_FrameBoundary_DetectedByPhaseOrder()
+        {
+            var scheduler = new TGTaskScheduler();
+
+            // 完整 Early -> Fixed -> Update -> Late -> End 循环只应计为 1 帧
+            scheduler.EarlyUpdate(0.016f, 0.016f);
+            Assert.AreEqual(1, scheduler.FrameCount);
+
+            scheduler.FixedUpdate(0.016f, 0.016f);
+            scheduler.Update(0.016f, 0.016f);
+            scheduler.LateUpdate(0.016f, 0.016f);
+            scheduler.EndOfFrame(0.016f, 0.016f);
+            Assert.AreEqual(1, scheduler.FrameCount);
+
+            // 重复 Update 调用按“再次进入新帧”处理
+            scheduler.Update(0.016f, 0.016f);
+            Assert.AreEqual(2, scheduler.FrameCount);
+
+            scheduler.Update(0.016f, 0.016f);
+            Assert.AreEqual(3, scheduler.FrameCount);
+
+            // Phase 回退也应视为新帧
+            scheduler.FixedUpdate(0.016f, 0.016f);
+            Assert.AreEqual(4, scheduler.FrameCount);
         }
 
         // ---- Phase-aware async helpers ----

@@ -19,7 +19,7 @@ namespace TryGet
         public int Count => _store.Count;
         public IEnumerable<string> Keys => _store.Keys;
 
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleSystem host) { }
         public void Shutdown() { _store.Clear(); }
 
         public bool ContainsKey(string key)

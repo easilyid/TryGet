@@ -65,7 +65,7 @@ namespace TryGet.Tests
         [Test]
         public void MockSerializer_RegisterAsModule_RetrievableFromHost()
         {
-            var host = new ModuleHost();
+            var host = new ModuleSystem();
             host.Register<ISerializer>(new MockBytesSerializer());
             host.Initialize();
 
@@ -84,7 +84,7 @@ namespace TryGet.Tests
 
             public int Priority => -600;
             public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
-            public void OnInit(IModuleHost host) { }
+            public void OnInit(IModuleSystem host) { }
             public void Shutdown() { }
 
             public bool IsSupported(Type type) => _supported.Contains(type);

@@ -8,7 +8,7 @@ namespace TryGet
     {
         private readonly Dictionary<string, IProcedure> _procedures = new Dictionary<string, IProcedure>();
         private readonly List<string> _stack = new List<string>();
-        private IModuleHost _host;
+        private IModuleSystem _host;
 
         private bool _isEntering;
         private bool _isExiting;
@@ -22,12 +22,12 @@ namespace TryGet
         public string CurrentProcedure => _stack.Count > 0 ? _stack[_stack.Count - 1] : null;
         public bool IsRunning => _stack.Count > 0;
         public int StackDepth => _stack.Count;
-        public IModuleHost Host => _host;
+        public IModuleSystem Host => _host;
         public bool IsEntering => _isEntering;
         public bool IsExiting => _isExiting;
         public Exception LastAsyncError => _lastAsyncError;
 
-        public void OnInit(IModuleHost host) { _host = host; }
+        public void OnInit(IModuleSystem host) { _host = host; }
 
         public void Shutdown()
         {
