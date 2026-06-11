@@ -28,7 +28,11 @@ namespace TryGet
         /// 周期性触发：每隔 <paramref name="intervalSeconds"/> 秒执行一次，直到 Cancel。
         /// 第一次触发在 intervalSeconds 后（不立即触发）。使用 scaled deltaTime。
         /// </summary>
-        TimerHandle ScheduleRepeat(float intervalSeconds, Action callback);
+        /// <param name="maxCatchUp">
+        /// 长帧补偿策略：当单帧 deltaTime 超过多个 interval 时，最多补偿触发的次数。
+        /// 0 = 不补偿（默认，保持当前行为）；int.MaxValue = 完全补偿所有丢失触发。
+        /// </param>
+        TimerHandle ScheduleRepeat(float intervalSeconds, Action callback, int maxCatchUp = 0);
 
         /// <summary>
         /// 取消定时器（一次性或周期性）。已触发并删除的一次性 handle 返回 false。

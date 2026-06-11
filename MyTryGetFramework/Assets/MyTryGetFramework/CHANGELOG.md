@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Timer Catch-up Policy (C7)**
+  - 新增 `ScheduleRepeat(float, Action, int maxCatchUp = 0)` 参数，控制长帧时的补偿行为
+  - `maxCatchUp = 0`（默认）：保持当前行为，单帧只触发一次，不补偿丢失触发
+  - `maxCatchUp = 1`：最多补偿 1 次丢失触发
+  - `maxCatchUp = int.MaxValue`：完全补偿所有丢失触发（类似 DGame GameTimer）
+  - 解决问题：技能 CD、buff tick、动画节拍在长帧后漂移
+  - 文件：`Runtime/Core/Timer/ITimerModule.cs`, `Runtime/Core/Timer/TimerModule.cs`
+  - 测试：`Tests/EditMode/TimerModuleCatchUpTests.cs`（6 个新测试）
+
 ## [2.0.0] - 2026-05-31
 
 ### Fixed

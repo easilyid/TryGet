@@ -24,6 +24,7 @@ namespace TryGet
             public bool Cancelled;
             public bool Repeating;
             public bool Paused;
+            public int MaxCatchUp;
         }
 
         private readonly List<Entry> _entries = new List<Entry>();
@@ -47,15 +48,15 @@ namespace TryGet
         public void Shutdown() { _entries.Clear(); }
 
         public TimerHandle Schedule(float seconds, Action callback) =>
-            ScheduleInternal(seconds, callback, unscaled: false, repeating: false);
+            ScheduleInternal(seconds, callback, unscaled: false, repeating: false, maxCatchUp: 0);
 
         public TimerHandle ScheduleUnscaled(float seconds, Action callback) =>
-            ScheduleInternal(seconds, callback, unscaled: true, repeating: false);
+            ScheduleInternal(seconds, callback, unscaled: true, repeating: false, maxCatchUp: 0);
 
-        public TimerHandle ScheduleRepeat(float intervalSeconds, Action callback) =>
-            ScheduleInternal(intervalSeconds, callback, unscaled: false, repeating: true);
+        public TimerHandle ScheduleRepeat(float intervalSeconds, Action callback, int maxCatchUp = 0) =>
+            ScheduleInternal(intervalSeconds, callback, unscaled: false, repeating: true, maxCatchUp);
 
-        private TimerHandle ScheduleInternal(float seconds, Action callback, bool unscaled, bool repeating)
+        private TimerHandle ScheduleInternal(float seconds, Action callback, bool unscaled, bool repeating, int maxCatchUp)
         {
             if (callback == null)
                 throw new ArgumentNullException(nameof(callback));
@@ -63,6 +64,8 @@ namespace TryGet
                 throw new ArgumentOutOfRangeException(nameof(seconds), "Must be >= 0");
             if (repeating && seconds <= 0f)
                 throw new ArgumentOutOfRangeException(nameof(seconds), "Repeating interval must be > 0 to avoid infinite loop");
+            if (maxCatchUp < 0)
+                throw new ArgumentOutOfRangeException(nameof(maxCatchUp), "Must be >= 0");
 
             long id = _nextId++;
             _entries.Add(new Entry
@@ -75,6 +78,7 @@ namespace TryGet
                 Cancelled = false,
                 Repeating = repeating,
                 Paused = false,
+                MaxCatchUp = maxCatchUp,
             });
             return new TimerHandle(id);
         }
@@ -176,22 +180,51 @@ namespace TryGet
                 {
                     var callback = entry.Callback;
 
-                    // V0.5: 周期 timer 不删除，重置 RemainingSeconds = Interval
+                    // V0.5: 周期 timer 不删除，重置 RemainingSeconds
+                    // C7: 补偿策略 — 长帧时触发主要的一次 + 最多 maxCatchUp 次补偿
                     if (entry.Repeating)
                     {
-                        entry.RemainingSeconds = entry.Interval;
+                        // 主触发（总是执行一次）
+                        try { callback?.Invoke(); }
+                        catch (Exception ex)
+                        {
+                            if (failures == null) failures = new List<Exception>();
+                            failures.Add(ex);
+                        }
+
+                        entry.RemainingSeconds += entry.Interval;
+
+                        // 补偿触发：循环直到 RemainingSeconds > 0 或达到 maxCatchUp 上限
+                        int compensated = 0;
+                        while (entry.RemainingSeconds <= 0f && compensated < entry.MaxCatchUp)
+                        {
+                            entry.RemainingSeconds += entry.Interval;
+                            compensated++;
+                            try { callback?.Invoke(); }
+                            catch (Exception ex)
+                            {
+                                if (failures == null) failures = new List<Exception>();
+                                failures.Add(ex);
+                            }
+                        }
+
+                        // 如果仍然 <= 0，说明超过 maxCatchUp，直接对齐到下一个周期
+                        if (entry.RemainingSeconds <= 0f)
+                        {
+                            entry.RemainingSeconds = entry.Interval;
+                        }
+
                         _entries[i] = entry;
                     }
                     else
                     {
                         _entries.RemoveAt(i);
-                    }
-
-                    try { callback?.Invoke(); }
-                    catch (Exception ex)
-                    {
-                        if (failures == null) failures = new List<Exception>();
-                        failures.Add(ex);
+                        try { callback?.Invoke(); }
+                        catch (Exception ex)
+                        {
+                            if (failures == null) failures = new List<Exception>();
+                            failures.Add(ex);
+                        }
                     }
                 }
                 else

@@ -193,7 +193,7 @@ namespace TryGet.Tests
             public void Shutdown() { _log.Add("shutdown:Timer"); }
             public TimerHandle Schedule(float s, Action c) => default;
             public TimerHandle ScheduleUnscaled(float s, Action c) => default;
-            public TimerHandle ScheduleRepeat(float s, Action c) => default;
+            public TimerHandle ScheduleRepeat(float s, Action c, int maxCatchUp = 0) => default;
             public bool Cancel(TimerHandle h) => false;
             public bool Pause(TimerHandle h) => false;
             public bool Resume(TimerHandle h) => false;
