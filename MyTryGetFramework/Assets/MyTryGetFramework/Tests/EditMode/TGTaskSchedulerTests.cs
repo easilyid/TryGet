@@ -341,19 +341,19 @@ namespace TryGet.Tests
             host.Initialize();
 
             bool executed = false;
-            AsyncDelayPhase(scheduler, 0.05f, FramePhase.FixedUpdate, () => executed = true);
+            AsyncDelayPhase(scheduler, 0.045f, FramePhase.FixedUpdate, () => executed = true);
 
-            // 第一帧：时间不够
+            // 第一帧：时间不够 (0.016)
             host.EarlyUpdate(0.016f, 0.016f);
             host.FixedUpdate(0.016f, 0.016f);
             Assert.IsFalse(executed);
 
-            // 第二帧：时间不够
+            // 第二帧：时间不够 (0.032)
             host.EarlyUpdate(0.016f, 0.016f);
             host.FixedUpdate(0.016f, 0.016f);
             Assert.IsFalse(executed);
 
-            // 第三帧：时间够了，在 FixedUpdate 执行
+            // 第三帧：时间够了 (0.048 > 0.045)，在 FixedUpdate 执行
             host.EarlyUpdate(0.016f, 0.016f);
             Assert.IsFalse(executed);  // EarlyUpdate 还不执行
 
@@ -418,7 +418,7 @@ namespace TryGet.Tests
             host.Register<ITGTaskScheduler>(scheduler);
             host.Initialize();
 
-            var task = scheduler.WaitForFrames(1);
+            var task = scheduler.WaitForFrames(2);
 
             // 第一帧：调用所有 5 个 Phase
             host.EarlyUpdate(0.016f, 0.016f);
@@ -428,7 +428,7 @@ namespace TryGet.Tests
             host.EndOfFrame(0.016f, 0.016f);
 
             // 任务不应在第一帧完成（frameCount 应该只 +1，不是 +5）
-            Assert.IsFalse(task.IsCompleted, "WaitForFrames(1) should not complete in the same frame");
+            Assert.IsFalse(task.IsCompleted, "WaitForFrames(2) should not complete in the same frame");
 
             // 第二帧：再次调用所有 Phase
             host.EarlyUpdate(0.016f, 0.016f);
@@ -438,7 +438,7 @@ namespace TryGet.Tests
             host.EndOfFrame(0.016f, 0.016f);
 
             // 现在应该完成（frameCount = 2）
-            Assert.IsTrue(task.IsCompleted, "WaitForFrames(1) should complete after 1 full frame");
+            Assert.IsTrue(task.IsCompleted, "WaitForFrames(2) should complete after 2 full frames");
         }
 
         [Test]

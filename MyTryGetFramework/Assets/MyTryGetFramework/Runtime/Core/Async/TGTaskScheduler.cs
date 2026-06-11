@@ -181,7 +181,6 @@ namespace TryGet.Async
             if (frameCount == 0)
             {
                 tcs.SetResult();
-                tcs.Return();
             }
             else
             {
@@ -262,7 +261,9 @@ namespace TryGet.Async
             {
                 var tcs = queues.ThisFrame[i];
                 tcs.SetResult();
-                tcs.Return();
+                // 注意：不能立即 Return，因为外部持有的 TGTask 还在引用这个 body
+                // Return 会调用 body.Reset()，导致 _completed 变回 false
+                // 应该由任务的持有者在使用完后 Return，或者不 Return（由 GC 回收）
             }
             queues.ThisFrame.Clear();
         }
@@ -277,7 +278,7 @@ namespace TryGet.Async
                 if (e.DueTime <= _elapsedTime)
                 {
                     e.Tcs.SetResult();
-                    e.Tcs.Return();
+                    // 不立即 Return，原因同 ProcessYieldQueue
                     delayQueue.RemoveAt(i);
                 }
             }
@@ -293,7 +294,7 @@ namespace TryGet.Async
                 if (e.DueFrame <= _frameCount)
                 {
                     e.Tcs.SetResult();
-                    e.Tcs.Return();
+                    // 不立即 Return，原因同 ProcessYieldQueue
                     frameQueue.RemoveAt(i);
                 }
             }
