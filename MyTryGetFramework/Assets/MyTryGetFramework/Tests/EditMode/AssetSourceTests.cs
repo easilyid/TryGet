@@ -116,13 +116,15 @@ namespace TryGet.Tests
         }
 
         [Test]
-        public async TGTask Memory_LoadAsync_AwaitableInAsyncBody()
+        public void Memory_LoadAsync_AwaitableInAsyncBody()
         {
             var src = new MemoryAssetSource();
             var prefab = new FakePrefab { Name = "Hero" };
             src.Add("hero", prefab);
 
-            var loaded = await src.LoadAsync<FakePrefab>("hero");
+            // 使用 GetAwaiter().GetResult() 同步等待
+            // 因为 NUnit 不支持 async TGTask 测试方法
+            var loaded = src.LoadAsync<FakePrefab>("hero").GetAwaiter().GetResult();
             Assert.AreSame(prefab, loaded);
             Assert.AreEqual("Hero", loaded.Name);
         }

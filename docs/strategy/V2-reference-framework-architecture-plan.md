@@ -710,6 +710,26 @@ Procedure Stack 适合游戏状态和 UI 叠层，但启动链、登录链、资
 
 ### Candidate 7 — Timer Catch-up Policy（坏帧有界追赶）
 
+**状态**：✅ **已实现**（2026/06/08）
+
+**来源参考**：DGame GameTimer 坏帧追赶（修正其全局预算缺陷）。
+
+**实现摘要**：
+
+- `ITimerModule.ScheduleRepeat` 新增 `maxCatchUp` 参数（默认 0，向后兼容）
+- `maxCatchUp = 0`：保持当前行为，单帧只触发一次
+- `maxCatchUp = N`：最多补偿 N 次丢失触发
+- `maxCatchUp = int.MaxValue`：完全补偿所有丢失触发
+- 每个 timer 独立配置，无全局预算限制
+- 纯 C# 实现，Shadow csproj 验证通过
+- 测试：`Tests/EditMode/TimerModuleCatchUpTests.cs`（6 个新测试）
+
+**解决问题**：技能 CD、buff tick、动画节拍在长帧后不再漂移。
+
+---
+
+### Candidate 7 — Timer Catch-up Policy（坏帧有界追赶）[已归档]
+
 **来源参考**：DGame GameTimer 坏帧追赶（修正其全局预算缺陷）。
 
 **必要性**：
