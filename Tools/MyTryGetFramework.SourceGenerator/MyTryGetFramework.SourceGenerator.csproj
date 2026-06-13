@@ -31,6 +31,9 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
+    <!-- 确定性构建：相同源码 + 相同 SDK 产出逐字节一致的 dll，减少 git 中的二进制漂移 -->
+    <Deterministic>true</Deterministic>
+
     <!-- 关掉 RS2008（"Enable analyzer release tracking"），analyzer release 表只在公开 nuget 包需要 -->
     <NoWarn>RS2008</NoWarn>
   </PropertyGroup>
@@ -44,11 +47,11 @@
   </ItemGroup>
 
   <!--
-    V0.9.5 Iter 2：build 完成后把 DLL 自动 copy 到 Unity Assets 内 Generators/ 目录。
-    这样 Unity Editor 重新 import 即可看到最新的 Generator；不需要手动 copy。
-    .meta 文件需要 commit 进 git（含 RoslynAnalyzer label）。
+    发布生成器：仅 Release 构建（即 build.ps1 / build.sh）才把 DLL 同步到 Unity Assets 内 Generators/ 目录。
+    Debug 构建与 `dotnet test`（依赖本工程）不会污染 Unity 现役 dll，避免二进制漂移。
+    .meta 文件含 RoslynAnalyzer label，需 commit 进 git。改生成器源码后务必跑构建脚本重建并提交 dll。
   -->
-  <Target Name="CopyToUnityAssets" AfterTargets="Build">
+  <Target Name="CopyToUnityAssets" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <UnityGeneratorsDir>$(MSBuildProjectDirectory)\..\..\MyTryGetFramework\Assets\MyTryGetFramework\Runtime\Core\Generators</UnityGeneratorsDir>
     </PropertyGroup>

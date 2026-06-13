@@ -889,11 +889,11 @@ TryGet `IObjectPool` 仅暴露 `IdleCount`（`IObjectPool.cs:22-25`），重复 
 
 ---
 
-### Candidate 10 — SourceGen Diagnostics（生成器诊断友好）
+### Candidate 10 — SourceGen Diagnostics（生成器诊断友好）✅ **已完成（2026/06/13）**
 
 **来源参考**：AlicizaX UIMetaSourceGenerator 的 `ReportDiagnostic`。
 
-> 与 Candidate 5（Generated Registry Diagnostics，运行时注册表诊断）互补：C5 是运行时可查询注册项，本候选是**编译期**对非法输入报错。
+> 实施记录：诊断 TG0001-TG0006 落地于 `Tools/MyTryGetFramework.SourceGenerator/src/Diagnostics/GeneratorDiagnostics.cs`；同迭代把生成器从「孤立 dll」确立为「源码工程一等公民」（专属 sln + GeneratorDriver 测试工程 + 一键构建脚本 + 文档），并修复了被 dll 黑盒掩盖的 `AssemblyManifestRegistry`→`ModuleRegistry` 命名漂移 bug。生成器单测 12/12、Unity EditMode 368/368 全绿。详见 CHANGELOG「V2.0 — Source Generator 工程化 + C10」段与 `Tools/README.md`。C12（框架契约 Analyzer）可在此基建上续作。
 
 **必要性**：
 
@@ -1027,7 +1027,7 @@ C1/C3/C7 已落地；6ter.3 自审发现 C2 已基本完成（仅剩收尾）。
 
 1. **P1 — C2 收尾（小）** ✅ **已完成（2026/06/13，同日实施）**：HandlerException 上报钩子 + MaxPublishDepth=32 递归护栏 + 关单，EditMode 368/368 验证。
 2. **P1 — C11 TGTask 池化生命周期收口（本轮主菜）** ✅ **已完成（2026/06/13，同日实施）**：消费侧统一归还 + 全路径 version 校验 + tcs 池化（设计调整见 Candidate 11 注记），调度器热路径稳态零分配。
-3. **P2 — C10 + C12 同迭代（Roslyn tooling 双件套）**：SourceGen 输入诊断 + 框架契约 Analyzer，共享管线摊薄成本。**← 下一个迭代起点**
+3. **P2 — C10 SourceGen 诊断** ✅ **已完成（2026/06/13）**：生成器源码工程化（专属 sln + 测试工程 + 构建脚本 + 文档）+ TG0001-TG0006 编译期诊断 + 修复命名漂移 bug。**C12（框架契约 Analyzer）可在此 Roslyn tooling 基建上续作 ← 下一个迭代起点**。
 4. **P2 — C4 Procedure Transition Result**、**C5 Registry 诊断**：顺位不变。
 5. **P3 — C9（已获 MyFramework ClassPool 蓝本强化）、C6**：等真实需求。
 6. **决策门 — C8**：不变，等 V2.3/V2.5。

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    MyTryGetFramework.SourceGenerator 的单元测试工程。
+
+    用途：用 Roslyn CSharpGeneratorDriver 在纯 .NET 环境下驱动生成器，
+    断言「生成的源码」与「报告的诊断」，让生成器源码的修改有回归保障。
+    对标 BigCat 的 Wjybxx.BigCatTool.Tests。
+
+    不依赖 Unity：被测输入代码所需的 TryGet attribute / 注册表桩在
+    GeneratorTestHelper 内联提供，使测试自包含、可 `dotnet test` 独立运行。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>TryGet.SourceGenerator.Tests</RootNamespace>
+    <AssemblyName>MyTryGetFramework.SourceGenerator.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+    <!-- 干净的 .NET 8 引用程序集集合，供被测 compilation 使用（不影响测试进程运行时） -->
+    <PackageReference Include="Basic.Reference.Assemblies.Net80" Version="1.7.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 普通项目引用：取生成器 output assembly，测试中手动 new 出生成器驱动 GeneratorDriver -->
+    <ProjectReference Include="..\MyTryGetFramework.SourceGenerator\MyTryGetFramework.SourceGenerator.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -4,6 +4,34 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — Source Generator 工程化 + C10 编译期诊断
+
+> 2026/06/13。把 Source Generator 从「Unity 里一个孤立 dll」确立为「源码工程一等公民 + dll 可重建产物」，
+> 并落地 C10（生成器对非法输入报编译期诊断）。参考框架印证：AlicizaX/MyFramework/BigCat 的生成器/分析器
+> 均为独立源码工程 + 进库 dll（Unity 无法编译生成器源码，dll 是必需产物）。
+
+### Fixed
+
+- **生成器命名漂移（被 dll 黑盒掩盖的真实 bug）**：`ModuleManifestGenerator` 源码生成对 `TryGet.AssemblyManifestRegistry` 的调用，但运行时类在 V2.0「收敛模块系统命名」（`fc93e45`）已改名为 `ModuleRegistry`——源码漏改且无人重建 dll，导致 git 源码生成「不存在的类」而 Unity 用旧 dll 掩盖。现已对齐为 `ModuleRegistry`，并由 `BaselineGenerationTests` 锁定（生成代码与运行时桩一起编译，再漂移即测试失败）。
+
+### Added
+
+- **生成器测试工程** `Tools/MyTryGetFramework.SourceGenerator.Tests/`：用 Roslyn `CSharpGeneratorDriver` 在纯 .NET 下驱动生成器、断言生成代码与诊断（12 例：4 基线 + 8 诊断）。对标 BigCat 的生成器测试工程。
+- **C10 编译期诊断 TG0001-TG0006**：非法 `[Module]` / `[EventHandler]` 用法不再静默 `return null`，改为带源码位置的编译错误（abstract/static 类、服务类型非接口、**未实现声明的服务接口**、handler 非 static、签名不符、事件参数非 struct）。其中「类必须实现服务接口」是 `ModuleAttribute` 注释一直声称却从未执行的检查。诊断信息用可缓存的 `LocationInfo`/`DiagnosticInfo`，不破坏增量生成缓存。
+- **生成器开发基建**：专属 `MyTryGetFramework.SourceGenerator.sln`、一键构建脚本 `build.ps1`/`build.sh`（测试 + Release 构建 + 同步 dll）、`Tools/README.md` 工作流文档；项目 `CLAUDE.md` 增补生成器工作流说明。
+
+### Changed
+
+- **dll 同步策略**：生成器 csproj 的 `CopyToUnityAssets` 改为**仅 Release 构建触发**，`Debug`/`dotnet test` 不再污染 Unity 现役 dll；显式 `<Deterministic>true</Deterministic>` 让相同源码产出逐字节一致的 dll，减少 git 二进制漂移。
+- `.gitignore` 增 `!Tools/**/*.sln` 例外（手维护的生成器开发 sln 进库）。
+
+### Verification
+
+- 生成器单测：`dotnet test Tools/MyTryGetFramework.SourceGenerator.sln` → 12/12 绿。
+- Unity EditMode：368/368 全绿（用重建后的 dll，确认命名修复正确 + C10 诊断不误伤现有合法代码）。
+
+---
+
 ## V2.0 — C11 TGTask 池化生命周期收口（消费侧统一归还）
 
 > 2026/06/13 第三轮参考框架分析（hsenl HTaskCompletionBody + BigCat ValuePromise 双印证）后实施。

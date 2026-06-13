@@ -9,7 +9,7 @@ namespace TryGet.SourceGenerator
     /// <summary>
     /// V0.9.5 Iter 3：扫描 <c>[TryGet.Module(typeof(IFoo))]</c> 标记类，生成
     /// <c>__AssemblyManifest_&lt;asm&gt;</c> 内 dual-trigger init 方法，把 Module 注册到
-    /// <c>TryGet.AssemblyManifestRegistry</c>。
+    /// <c>TryGet.ModuleRegistry</c>。
     ///
     /// 设计要点：
     /// - <see cref="ForAttributeWithMetadataName"/> 入口，避免遍历整个语法树
@@ -26,55 +26,80 @@ namespace TryGet.SourceGenerator
 
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            // 找到所有 [Module(typeof(IFoo))] 标记的类
-            var moduleInfos = context.SyntaxProvider
+            // 找到所有 [Module(typeof(IFoo))] 标记的类（不在此过滤非法输入，留到输出阶段报诊断）
+            var extractions = context.SyntaxProvider
                 .ForAttributeWithMetadataName(
                     ModuleAttributeMetadataName,
                     predicate: static (node, _) => true,
-                    transform: static (ctx, _) => ExtractModuleInfo(ctx))
-                .Where(static info => info is not null)
-                .Select(static (info, _) => info!.Value);
+                    transform: static (ctx, _) => ExtractModule(ctx));
 
-            // 收集 (CompilationName, ImmutableArray<ModuleInfo>) 用于聚合
-            var compilationAndModules = context.CompilationProvider
-                .Combine(moduleInfos.Collect());
+            var compilationAndExtractions = context.CompilationProvider
+                .Combine(extractions.Collect());
 
-            context.RegisterSourceOutput(compilationAndModules, static (spc, source) =>
+            context.RegisterSourceOutput(compilationAndExtractions, static (spc, source) =>
             {
-                var (compilation, modules) = source;
-                if (modules.IsDefaultOrEmpty) return;
+                var (compilation, exts) = source;
 
-                string assemblyName = compilation.AssemblyName ?? "Unknown";
-                string safeAsmId = MakeSafeIdentifier(assemblyName);
+                // 先报告非法输入诊断（替代历史的静默 return null），再收集合法 Module 生成 manifest
+                var modules = ImmutableArray.CreateBuilder<ModuleInfo>();
+                foreach (var ext in exts)
+                {
+                    if (ext.Diagnostic is { } diagnostic)
+                        spc.ReportDiagnostic(diagnostic.ToDiagnostic());
+                    if (ext.Info is { } info)
+                        modules.Add(info);
+                }
 
-                string sourceText = GenerateManifest(safeAsmId, modules);
-                spc.AddSource($"__AssemblyManifest_{safeAsmId}.g.cs", sourceText);
+                if (modules.Count == 0) return;
+
+                string safeAsmId = MakeSafeIdentifier(compilation.AssemblyName ?? "Unknown");
+                spc.AddSource($"__AssemblyManifest_{safeAsmId}.g.cs", GenerateManifest(safeAsmId, modules.ToImmutable()));
             });
         }
 
-        private static ModuleInfo? ExtractModuleInfo(GeneratorAttributeSyntaxContext ctx)
+        private static ModuleExtraction ExtractModule(GeneratorAttributeSyntaxContext ctx)
         {
-            // 取被标记的类符号
             if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol)
-                return null;
+                return default; // attribute 限定标在 class 上，正常不会发生
 
             if (classSymbol.IsAbstract || classSymbol.IsStatic)
-                return null;
+                return Fail(GeneratorDiagnostics.ModuleNotConcrete, classSymbol, classSymbol.Name);
 
             // 取 [Module(typeof(IFoo))] 的第一个构造器参数
             var attr = ctx.Attributes.FirstOrDefault();
             if (attr is null || attr.ConstructorArguments.Length == 0)
-                return null;
+                return default; // 缺 typeof 参数时编译器已对 attribute 自身报错
 
             var serviceTypeArg = attr.ConstructorArguments[0];
             if (serviceTypeArg.Value is not INamedTypeSymbol serviceTypeSymbol)
-                return null;
+                return Fail(GeneratorDiagnostics.ModuleServiceTypeInvalid, classSymbol,
+                    serviceTypeArg.Value?.ToString() ?? "?");
 
-            // 类必须实现服务接口（编译期可由 Roslyn 自动检查；这里仅用 FullName 生成代码）
+            if (serviceTypeSymbol.TypeKind != TypeKind.Interface)
+                return Fail(GeneratorDiagnostics.ModuleServiceTypeInvalid, classSymbol, serviceTypeSymbol.Name);
+
+            // C10：补上 attribute 注释一直声称、却从未执行的检查——类必须实现声明的服务接口。
+            // 否则生成的 host.Register<IFoo>(new Bar()) 会在 IFoo 处编译失败，错误指向生成代码而非用户代码。
+            if (!ImplementsInterface(classSymbol, serviceTypeSymbol))
+                return Fail(GeneratorDiagnostics.ModuleDoesNotImplementService, classSymbol,
+                    serviceTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+
             string classFullName = classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             string serviceFullName = serviceTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            return new ModuleExtraction(new ModuleInfo(classFullName, serviceFullName), null);
+        }
 
-            return new ModuleInfo(classFullName, serviceFullName);
+        private static ModuleExtraction Fail(DiagnosticDescriptor descriptor, ISymbol locationSymbol, string messageArg)
+            => new(null, new DiagnosticInfo(descriptor, LocationInfo.From(locationSymbol), messageArg));
+
+        private static bool ImplementsInterface(INamedTypeSymbol type, INamedTypeSymbol iface)
+        {
+            foreach (var i in type.AllInterfaces)
+            {
+                if (SymbolEqualityComparer.Default.Equals(i, iface))
+                    return true;
+            }
+            return false;
         }
 
         private static string GenerateManifest(string safeAsmId, ImmutableArray<ModuleInfo> modules)
@@ -97,7 +122,7 @@ namespace TryGet.SourceGenerator
             sb.AppendLine("        {");
             sb.AppendLine("            if (_initialized) return;");
             sb.AppendLine("            _initialized = true;");
-            sb.AppendLine("            global::TryGet.AssemblyManifestRegistry.Register(host =>");
+            sb.AppendLine("            global::TryGet.ModuleRegistry.Register(host =>");
             sb.AppendLine("            {");
 
             // 稳定排序，避免 Generator 输出在不同 Roslyn 版本下抖动
@@ -137,6 +162,12 @@ namespace TryGet.SourceGenerator
     /// 仅含 string 字段，不持 ISymbol / SyntaxNode 引用，避免 Compilation 锁定。
     /// </summary>
     internal readonly record struct ModuleInfo(string ClassFullName, string ServiceFullName);
+
+    /// <summary>
+    /// transform 阶段的产出：合法 Module 的 <see cref="ModuleInfo"/>，或非法输入的 <see cref="DiagnosticInfo"/>。
+    /// 两者都可缓存（值相等 / descriptor 引用稳定），不破坏 incremental pipeline。
+    /// </summary>
+    internal readonly record struct ModuleExtraction(ModuleInfo? Info, DiagnosticInfo? Diagnostic);
 }
 
 namespace System.Runtime.CompilerServices

@@ -17,43 +17,59 @@ namespace TryGet.SourceGenerator
 
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            var handlerInfos = context.SyntaxProvider
+            var extractions = context.SyntaxProvider
                 .ForAttributeWithMetadataName(
                     AttributeMetadataName,
                     predicate: static (node, _) => true,
-                    transform: static (ctx, _) => ExtractHandlerInfo(ctx))
-                .Where(static info => info is not null)
-                .Select(static (info, _) => info!.Value);
+                    transform: static (ctx, _) => ExtractHandler(ctx));
 
-            var compilationAndHandlers = context.CompilationProvider
-                .Combine(handlerInfos.Collect());
+            var compilationAndExtractions = context.CompilationProvider
+                .Combine(extractions.Collect());
 
-            context.RegisterSourceOutput(compilationAndHandlers, static (spc, source) =>
+            context.RegisterSourceOutput(compilationAndExtractions, static (spc, source) =>
             {
-                var (compilation, handlers) = source;
-                if (handlers.IsDefaultOrEmpty) return;
+                var (compilation, exts) = source;
+
+                // 先报告非法输入诊断（替代历史的静默 return null），再收集合法 handler 生成 manifest
+                var handlers = ImmutableArray.CreateBuilder<EventHandlerInfo>();
+                foreach (var ext in exts)
+                {
+                    if (ext.Diagnostic is { } diagnostic)
+                        spc.ReportDiagnostic(diagnostic.ToDiagnostic());
+                    if (ext.Info is { } info)
+                        handlers.Add(info);
+                }
+
+                if (handlers.Count == 0) return;
 
                 string safeAsmId = MakeSafeIdentifier(compilation.AssemblyName ?? "Unknown");
-                spc.AddSource($"__EventHandlerManifest_{safeAsmId}.g.cs", GenerateManifest(safeAsmId, handlers));
+                spc.AddSource($"__EventHandlerManifest_{safeAsmId}.g.cs", GenerateManifest(safeAsmId, handlers.ToImmutable()));
             });
         }
 
-        private static EventHandlerInfo? ExtractHandlerInfo(GeneratorAttributeSyntaxContext ctx)
+        private static EventHandlerExtraction ExtractHandler(GeneratorAttributeSyntaxContext ctx)
         {
-            if (ctx.TargetSymbol is not IMethodSymbol method) return null;
-            if (!method.IsStatic) return null;
-            if (method.Parameters.Length != 1) return null;
-            if (method.ReturnType.SpecialType != SpecialType.System_Void) return null;
+            if (ctx.TargetSymbol is not IMethodSymbol method)
+                return default; // attribute 限定标在方法上
+
+            if (!method.IsStatic)
+                return Fail(GeneratorDiagnostics.EventHandlerNotStatic, method, method.Name);
+
+            if (method.Parameters.Length != 1 || method.ReturnType.SpecialType != SpecialType.System_Void)
+                return Fail(GeneratorDiagnostics.EventHandlerInvalidSignature, method, method.Name);
 
             var eventType = method.Parameters[0].Type;
-            if (eventType.TypeKind != TypeKind.Struct) return null; // IEventBus 约束 T : struct
+            if (eventType.TypeKind != TypeKind.Struct) // IEventModule 约束 T : struct
+                return Fail(GeneratorDiagnostics.EventHandlerParamNotStruct, method,
+                    eventType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
 
             string containingTypeFullName = method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            string methodName = method.Name;
             string eventTypeFullName = eventType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-            return new EventHandlerInfo(containingTypeFullName, methodName, eventTypeFullName);
+            return new EventHandlerExtraction(new EventHandlerInfo(containingTypeFullName, method.Name, eventTypeFullName), null);
         }
+
+        private static EventHandlerExtraction Fail(DiagnosticDescriptor descriptor, ISymbol locationSymbol, string messageArg)
+            => new(null, new DiagnosticInfo(descriptor, LocationInfo.From(locationSymbol), messageArg));
 
         private static string GenerateManifest(string safeAsmId, ImmutableArray<EventHandlerInfo> handlers)
         {
@@ -116,4 +132,9 @@ namespace TryGet.SourceGenerator
         string ContainingTypeFullName,
         string MethodName,
         string EventTypeFullName);
+
+    /// <summary>
+    /// transform 阶段的产出：合法 handler 的 <see cref="EventHandlerInfo"/>，或非法输入的 <see cref="DiagnosticInfo"/>。
+    /// </summary>
+    internal readonly record struct EventHandlerExtraction(EventHandlerInfo? Info, DiagnosticInfo? Diagnostic);
 }

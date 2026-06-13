@@ -28,6 +28,8 @@ sysinfo.txt
 !ServerProject/**/*.csproj
 !Samples/**/*.csproj
 !Tools/**/*.csproj
+# Source Generator dev solution is hand-maintained (not Unity-generated)
+!Tools/**/*.sln
 
 # Tools/ build outputs
 Tools/**/bin/
