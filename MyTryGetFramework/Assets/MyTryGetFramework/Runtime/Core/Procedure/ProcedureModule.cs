@@ -15,6 +15,7 @@ namespace TryGet
         private int _pendingExitCount;
         private int _exitVersion;
         private Exception _lastAsyncError;
+        private TGTaskCompletionSource _activeTransition;
 
         public int Priority => -200;
         public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
@@ -31,6 +32,7 @@ namespace TryGet
 
         public void Shutdown()
         {
+            CancelActiveTransition();
             if (_stack.Count > 0)
             {
                 for (int i = _stack.Count - 1; i >= 0; i--)
@@ -126,6 +128,7 @@ namespace TryGet
         {
             if (_stack.Count == 0) return;
 
+            CancelActiveTransition();
             _exitVersion++;
             _isEntering = false;
 
@@ -197,7 +200,8 @@ namespace TryGet
 
         /// <summary>
         /// C4：把一次「可能含异步 enter/exit」的切换包装成可 await 的 TGTask。
-        /// 同步全程走完 → 立即完成（CompletedTask / FromException）；异步未完成 → 返回延迟完成的 tcs.Task。
+        /// 同步全程走完 → 立即完成（CompletedTask / FromException）；异步未完成 → 返回延迟完成的 tcs.Task，
+        /// 并存入 <see cref="_activeTransition"/> 以便 <see cref="Stop"/> / <see cref="Shutdown"/> 打断时取消。
         /// onComplete(error) 由切换链在其真正完成点（同步立即 / 异步 OnCompleted / 错误）调用一次。
         /// </summary>
         private TGTask RunTransition(Action<Action<Exception>> start)
@@ -213,15 +217,16 @@ namespace TryGet
                     // 切换在 start() 内同步完成
                     syncDone = true;
                     syncError = error;
+                    return;
                 }
-                else if (error != null)
-                {
+
+                // 正常完成：先摘除 active 引用（避免后续 Stop 误取消已完成的切换）
+                if (ReferenceEquals(_activeTransition, tcs))
+                    _activeTransition = null;
+                if (error != null)
                     tcs.SetException(error);
-                }
                 else
-                {
                     tcs.SetResult();
-                }
             }
 
             start(OnComplete);
@@ -229,9 +234,22 @@ namespace TryGet
             if (syncDone)
                 return syncError != null ? TGTask.FromException(syncError) : TGTask.CompletedTask;
 
-            // 异步未完成：建立 tcs，OnComplete 将在未来帧完成它
+            // 异步未完成：建立 tcs，OnComplete 将在未来帧完成它；记录为活动切换以便打断时取消
             tcs = new TGTaskCompletionSource();
+            _activeTransition = tcs;
             return tcs.Task;
+        }
+
+        /// <summary>
+        /// 取消当前进行中的异步切换（被 Stop / Shutdown 打断时调用），让其 transition task 以
+        /// OperationCanceledException 完成，避免 await 者永久挂起。
+        /// </summary>
+        private void CancelActiveTransition()
+        {
+            var pending = _activeTransition;
+            if (pending == null) return;
+            _activeTransition = null;
+            pending.SetCanceled();
         }
 
         private void EnterProcedure(string id, Action<Exception> onComplete)

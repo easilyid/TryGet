@@ -25,8 +25,9 @@
   </ItemGroup>
 
   <!-- V0.9.5: 引用 Source Generator 作为 Analyzer，让 Samples/Net 也享受 [Module] 自动注册 -->
+  <!-- 生成器源码已迁入框架内 Generators~/（2026/06/13，对标 Unity Netcode Source~ 模式） -->
   <ItemGroup>
-    <ProjectReference Include="..\..\Tools\MyTryGetFramework.SourceGenerator\MyTryGetFramework.SourceGenerator.csproj"
+    <ProjectReference Include="..\..\MyTryGetFramework\Assets\MyTryGetFramework\Generators~\MyTryGetFramework.SourceGenerator\MyTryGetFramework.SourceGenerator.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>

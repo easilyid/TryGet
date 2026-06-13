@@ -10,13 +10,13 @@ namespace TryGet.Samples.Net
     /// 编译期 Source Generator 会在此 assembly 生成 <c>__AssemblyManifest_TryGet_Samples_Net</c>，
     /// 该类在 .NET 端通过 <c>[ModuleInitializer]</c>、Unity 端通过
     /// <c>[RuntimeInitializeOnLoadMethod]</c> 自动把注册委托交给
-    /// <see cref="AssemblyManifestRegistry"/>。
+    /// <see cref="ModuleRegistry"/>。
     ///
     /// <see cref="GameplayHandlers.OnTickEvent"/> 标了 <see cref="EventHandlerAttribute"/>，
     /// Generator 在 <c>__EventHandlerManifest_TryGet_Samples_Net</c> 内通过同样的 dual-trigger
     /// init 把 handler 注册到 <see cref="EventHandlerRegistry"/>。
     ///
-    /// <see cref="Bootstrap.CreateHost"/> 调 <see cref="AssemblyManifestRegistry.ApplyAll"/> +
+    /// <see cref="GameLauncher.CreateHost"/> 调 <see cref="ModuleRegistry.ApplyAll"/> +
     /// <see cref="EventHandlerRegistry.ApplyAll"/> 让两者都生效。
     /// </summary>
     public interface IGreetingModule : IModule
@@ -29,7 +29,7 @@ namespace TryGet.Samples.Net
     {
         public int Priority => 0;
         public IReadOnlyList<System.Type> DependsOn => System.Array.Empty<System.Type>();
-        public void OnInit(IModuleHost host) { }
+        public void OnInit(IModuleSystem host) { }
         public void Shutdown() { }
 
         public string Greet(string who) => $"Hello from V0.9.5 auto-registered Module, {who}!";

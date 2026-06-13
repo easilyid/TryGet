@@ -187,6 +187,45 @@ namespace TryGet.Tests
             Assert.AreEqual(0, nextEnter.EnterCount, "exit 失败时不应进入替换目标");
         }
 
+        // ---------- Stop / Shutdown 打断 pending transition ----------
+
+        [Test]
+        public void Stop_DuringPendingAsyncTransition_CancelsTransitionTask()
+        {
+            var module = NewModule(out _);
+            var enterTcs = new TGTaskCompletionSource();
+            module.AddProcedure("p1", new TcsAsyncProc(enterTcs, null));
+
+            var t = module.Start("p1");
+            Assert.IsFalse(t.IsCompleted, "async enter 未完成，transition 应 pending");
+
+            module.Stop();
+
+            Assert.IsTrue(t.IsCompleted, "Stop 打断后 pending transition 必须完成（取消），不能永久挂起");
+            Assert.Throws<OperationCanceledException>(() => t.GetAwaiter().GetResult(),
+                "被打断的切换应以 OperationCanceledException 完成");
+
+            enterTcs.Return();
+        }
+
+        [Test]
+        public void Stop_ThenLateEnterCompletion_IsIdempotent_NoThrow()
+        {
+            var module = NewModule(out _);
+            var enterTcs = new TGTaskCompletionSource();
+            module.AddProcedure("p1", new TcsAsyncProc(enterTcs, null));
+
+            module.Start("p1");
+            module.Stop();
+
+            // enter 在 Stop 之后才完成：二次 Set transition（已取消）应幂等、不崩
+            Assert.DoesNotThrow(() =>
+            {
+                enterTcs.SetResult();
+                enterTcs.Return();
+            });
+        }
+
         // ---------- helpers ----------
 
         private static ProcedureModule NewModule(out ProcedureModule m)

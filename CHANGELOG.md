@@ -4,6 +4,24 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — 自审修复：C4 transition 取消 + Samples/Net 复活
+
+> 2026/06/13。对本轮（C2/C11/C10/生成器迁移/C4）产出做系统性自审，发现并修复 4 个问题，其中 2 个是真实 bug/损坏。
+
+### Fixed
+
+- **C4 transition 泄漏（真实 bug）**：`Stop`/`Shutdown` 打断 pending 异步切换时，该切换的 transition task 永不完成（`await module.Push(...)` 的调用者永久挂起）——`RunTransition` 的 tcs 是局部变量、Stop 访问不到。修复：ProcedureModule 持 `_activeTransition` 引用，`Stop`/`Shutdown` 调 `CancelActiveTransition()` 以 `OperationCanceledException` 完成它。+2 回归测试（含「取消后迟到完成幂等」边界）。
+- **Samples/Net 长期编译失败（损坏，无 CI/不在 Unity 测试路径，坏了很久没被发现）**：停留在 ADR-0020 重定向前的旧 API（`IModuleHost`/`BootstrapOptions`/`Bootstrap.CreateHost`/`host.EventBus`/`AssemblyManifestRegistry`/`IModule.OnInit(IModuleHost)`）。更新到当前 API（`IModuleSystem`/`GameLauncherOptions`/`GameLauncher.CreateHost`/`host.EventModule`/`ModuleRegistry`），并用 C4 可 await 切换重写主流程（删除 `WaitForEnter`/`WaitForExit` 轮询，改 `await proc.Start/Replace`）——成为 C4 的活样板。
+- **生成器引用路径迁移遗漏**：`Samples/Net` csproj 对生成器工程的 `ProjectReference` 仍指向旧 `Tools/` 路径（上一提交 `adc6420` 迁移时只改了 Shadow csproj、漏了 Samples）。修正为 `Generators~/`。
+- 本轮新写但已过时的文档路径（CHANGELOG / plan 中 `Tools/...sln`、`Tools/README.md`）修正为 `Generators~/`（历史段的 Tools/ 提及是正确快照，保留）。
+
+### Verification
+
+- **Samples/Net `dotnet run` 端到端跑通**：`[Module]`/`[EventHandler]` 自动注册在 .NET 端生效（auto-registered Module + TickEvent handler）；Boot→Login→InGame 三阶段可 await 切换、每段 async enter 按序完成；完整生命周期顺序正确。这是 Shadow csproj 之外验证 Core 跨端 + 生成器 + C4 的活样板。
+- Unity EditMode：380/380（C4 测试增至 12 例）；Shadow csproj `dotnet build` 0 警告 0 错误。
+
+---
+
 ## V2.0 — C4 Procedure Transition Result（可 await 流程切换）
 
 > 2026/06/13。消除 §7.4 点名的 shallow interface：ProcedureModule 此前暴露 `IsEntering`/`IsExiting`/`LastAsyncError`
@@ -73,7 +91,7 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 ### Verification
 
-- 生成器单测：`dotnet test Tools/MyTryGetFramework.SourceGenerator.sln` → 12/12 绿。
+- 生成器单测：`dotnet test "MyTryGetFramework/Assets/MyTryGetFramework/Generators~/MyTryGetFramework.SourceGenerator.sln"` → 12/12 绿。
 - Unity EditMode：368/368 全绿（用重建后的 dll，确认命名修复正确 + C10 诊断不误伤现有合法代码）。
 
 ---

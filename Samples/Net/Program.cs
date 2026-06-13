@@ -24,7 +24,7 @@ namespace TryGet.Samples.Net
                     var proc = new ProcedureModule();
                     host.Register<IProcedureModule>(proc);
 
-                    // 业务 Procedure 在 setup 阶段就 Add（Bootstrap.Initialize 内会被 OnInit）
+                    // 业务 Procedure 在 setup 阶段就 Add（host.Initialize 内会被 OnInit）
                     var log = host.Get<ILogger>();
                     var sched = host.Get<ITGTaskScheduler>();
                     proc.AddProcedure("boot", new BootProcedure(log, sched));
@@ -32,11 +32,11 @@ namespace TryGet.Samples.Net
                     proc.AddProcedure("ingame", new InGameProcedure(log, sched));
                 },
                 mainAsync: RunMainAsync,
-                options: new BootstrapOptions { MinimumLogLevel = LogLevel.Debug },
+                options: new GameLauncherOptions { MinimumLogLevel = LogLevel.Debug },
                 timeoutMs: 10_000);
         }
 
-        private static async TGTask RunMainAsync(IModuleHost host)
+        private static async TGTask RunMainAsync(IModuleSystem host)
         {
             var log = host.Get<ILogger>();
             var sched = host.Get<ITGTaskScheduler>();
@@ -47,39 +47,22 @@ namespace TryGet.Samples.Net
             log.Info(greeter.Greet("Samples/Net"));
 
             // V0.9.5 Demo: GameplayHandlers.OnTickEvent 由 [EventHandler] 自动 Subscribe。
-            host.EventBus.Publish(new TickEvent(42));
+            host.EventModule.Publish(new TickEvent(42));
             log.Info($"TickEvent handler observed LastTickIndex = {GameplayHandlers.LastTickIndex}");
-
-            // V0.9.5 Demo: [EventHandler] auto-subscribe verified above.
 
             log.Info("=== MainAsync start ===");
 
-            proc.Start("boot");
-            await WaitForEnter(proc, sched);
-
-            proc.Replace("login");
-            await WaitForEnter(proc, sched);
-
-            proc.Replace("ingame");
-            await WaitForEnter(proc, sched);
+            // C4 Demo: 流程切换可直接 await，无需轮询 IsEntering/IsExiting。
+            await proc.Start("boot");
+            await proc.Replace("login");
+            await proc.Replace("ingame");
 
             log.Info("InGame] playing for 1.0s...");
             await sched.Delay(1.0f);
 
             proc.Stop();
-            await WaitForExit(proc, sched);
 
             log.Info("=== MainAsync done ===");
-        }
-
-        private static async TGTask WaitForEnter(IProcedureModule proc, ITGTaskScheduler sched)
-        {
-            while (proc.IsEntering) await sched.Yield();
-        }
-
-        private static async TGTask WaitForExit(IProcedureModule proc, ITGTaskScheduler sched)
-        {
-            while (proc.IsExiting) await sched.Yield();
         }
     }
 
