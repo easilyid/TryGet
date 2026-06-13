@@ -6,15 +6,39 @@ namespace TryGet
 {
     internal sealed class EventModule : IEventModule
     {
+        /// <summary>
+        /// Publish 嵌套深度上限。handler 内再 Publish（任意事件类型）累计深度超过此值时抛出，
+        /// 防止事件互相触发形成无限递归导致栈溢出（参考 MyFramework EventSystem MAX_DEPTH）。
+        /// </summary>
+        internal const int MaxPublishDepth = 32;
+
         private readonly Dictionary<Type, object> _handlers = new Dictionary<Type, object>();
+
+        private int _publishDepth;
+
+        public event Action<Type, Exception> HandlerException;
 
         public void Publish<T>(T evt) where T : struct
         {
+            if (_publishDepth >= MaxPublishDepth)
+                throw new InvalidOperationException(
+                    "EventModule.Publish nesting depth exceeded " + MaxPublishDepth +
+                    ". Events are likely publishing each other in an infinite cycle (event type: " + typeof(T).Name + ").");
+
             Type key = typeof(T);
             if (!_handlers.TryGetValue(key, out var obj) || !(obj is HandlerList<T> list))
                 return;
 
-            list.Publish(evt);
+            _publishDepth++;
+            try
+            {
+                list.Publish(evt, this);
+            }
+            finally
+            {
+                _publishDepth--;
+            }
+
             if (list.Count == 0)
                 _handlers.Remove(key);
         }
@@ -76,6 +100,22 @@ namespace TryGet
             _handlers.Clear();
         }
 
+        private void RaiseHandlerException(Type eventType, Exception ex)
+        {
+            var handler = HandlerException;
+            if (handler == null)
+                return;
+
+            try
+            {
+                handler(eventType, ex);
+            }
+            catch
+            {
+                // 吞掉钩子自身的异常，防止级联中断派发
+            }
+        }
+
         private sealed class HandlerList<T> where T : struct
         {
             private readonly List<Action<T>> _handlers = new List<Action<T>>();
@@ -88,7 +128,7 @@ namespace TryGet
 
             public IReadOnlyList<Exception> LastPublishExceptions => _lastPublishExceptions;
 
-            public void Publish(T evt)
+            public void Publish(T evt, EventModule owner)
             {
                 if (_dispatchDepth == 0)
                     _lastPublishExceptions.Clear();
@@ -106,6 +146,7 @@ namespace TryGet
                         catch (Exception ex)
                         {
                             _lastPublishExceptions.Add(ex);
+                            owner.RaiseHandlerException(typeof(T), ex);
                         }
                     }
                 }
