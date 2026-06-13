@@ -129,7 +129,7 @@ namespace TryGet.Async
     public sealed class TGTaskCompletionSource<T>
     {
         private TGTaskBody<T> _body;
-        private readonly int _version;
+        private int _version; // 修复：去掉 readonly，与非泛型版一致（避免 copy-paste bug）
 
         public TGTaskCompletionSource()
         {
