@@ -4,6 +4,27 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — Source Generator 源码迁入框架包（Generators~）
+
+> 2026/06/13。把生成器源码工程从仓库根 `Tools/` 迁入框架包内 `MyTryGetFramework/Assets/MyTryGetFramework/Generators~/`，
+> 让生成器逻辑随框架自包含分发。采用 Unity 官方 Netcode for Entities 的 `Source~` 模式：`~` 结尾文件夹被 Unity 完全
+> 忽略（不编译/不 import），生成器源码因而可安放在框架内。dll 仍为必需的构建产物（Unity 6 硬约束，无法消除，
+> 见 docs.unity3d.com `create-source-generator`），保持在 `Runtime/Core/Generators/` 并带 `RoslynAnalyzer` label。
+
+### Changed
+
+- 生成器源码工程 `Tools/MyTryGetFramework.SourceGenerator*` → `MyTryGetFramework/Assets/MyTryGetFramework/Generators~/`（sln / build 脚本 / 生成器工程 / 测试工程整体迁入）。
+- 生成器 csproj 的 `CopyToUnityAssets` 同步路径相应缩短（`..\..\Runtime\Core\Generators`）。
+- `.gitignore`：Tools 例外规则改为 `Generators~/` 路径（csproj/sln 进库、bin/obj 忽略）。
+- 文档（`CLAUDE.md`、`Generators~/README.md`）更新路径并补充 Netcode `Source~` 先例与 Unity 6 dll 约束说明。
+
+### Verification
+
+- 生成器单测：12/12 绿（从框架内新位置构建）。
+- Unity EditMode：368/368 全绿 —— 验证 `~` 文件夹被 Unity 正确忽略（未误编译生成器源码）且新 dll 工作正常。
+
+---
+
 ## V2.0 — Source Generator 工程化 + C10 编译期诊断
 
 > 2026/06/13。把 Source Generator 从「Unity 里一个孤立 dll」确立为「源码工程一等公民 + dll 可重建产物」，

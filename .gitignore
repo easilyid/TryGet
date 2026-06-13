@@ -27,13 +27,14 @@ sysinfo.txt
 # Allow checked-in Shadow csproj + Net samples + Source Generator (dual-end builds)
 !ServerProject/**/*.csproj
 !Samples/**/*.csproj
-!Tools/**/*.csproj
+# Source Generator dev project lives inside the framework under Generators~/ (Unity ignores ~ folders)
+!MyTryGetFramework/Assets/MyTryGetFramework/Generators~/**/*.csproj
 # Source Generator dev solution is hand-maintained (not Unity-generated)
-!Tools/**/*.sln
+!MyTryGetFramework/Assets/MyTryGetFramework/Generators~/**/*.sln
 
-# Tools/ build outputs
-Tools/**/bin/
-Tools/**/obj/
+# Source Generator build outputs (inside framework Generators~/)
+MyTryGetFramework/Assets/MyTryGetFramework/Generators~/**/bin/
+MyTryGetFramework/Assets/MyTryGetFramework/Generators~/**/obj/
 
 # Unity asset store tools
 [Aa]ssets/AssetStoreTools*

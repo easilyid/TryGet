@@ -47,13 +47,16 @@
   </ItemGroup>
 
   <!--
-    发布生成器：仅 Release 构建（即 build.ps1 / build.sh）才把 DLL 同步到 Unity Assets 内 Generators/ 目录。
+    发布生成器：仅 Release 构建（即 build.ps1 / build.sh）才把 DLL 同步到框架的 Runtime/Core/Generators/ 目录。
+    本工程源码位于框架内 Generators~/（Unity 忽略 ~ 文件夹，不会把生成器源码当游戏代码编译），
+    对标 Unity 官方 Netcode for Entities 的 Source~ 模式。
     Debug 构建与 `dotnet test`（依赖本工程）不会污染 Unity 现役 dll，避免二进制漂移。
     .meta 文件含 RoslynAnalyzer label，需 commit 进 git。改生成器源码后务必跑构建脚本重建并提交 dll。
   -->
   <Target Name="CopyToUnityAssets" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
-      <UnityGeneratorsDir>$(MSBuildProjectDirectory)\..\..\MyTryGetFramework\Assets\MyTryGetFramework\Runtime\Core\Generators</UnityGeneratorsDir>
+      <!-- 从 Generators~/MyTryGetFramework.SourceGenerator/ 上溯两级到框架包根，再进 Runtime/Core/Generators -->
+      <UnityGeneratorsDir>$(MSBuildProjectDirectory)\..\..\Runtime\Core\Generators</UnityGeneratorsDir>
     </PropertyGroup>
     <MakeDir Directories="$(UnityGeneratorsDir)" />
     <Copy SourceFiles="$(TargetPath)"
