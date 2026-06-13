@@ -4,9 +4,32 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
-## V2.1 — EventBus 零 GC 派发 + 生命周期策略
+## V2.0 — C11 TGTask 池化生命周期收口（消费侧统一归还）
+
+> 2026/06/13 第三轮参考框架分析（hsenl HTaskCompletionBody + BigCat ValuePromise 双印证）后实施。
+> 一次清掉三项关联技术债：IsCompleted 不校验 Version / Manual body 漏 GC / 调度器热路径每次堆分配。
+> 设计相对 C11 草案的调整：不做「完成即 Version++」（会破坏 tcs TrySet 静默语义），
+> 改用「消费侧统一归还 + 全路径 version 校验」达成同等安全性。详见计划文档 Candidate 11。
+
+### Changed
+
+- **消费侧统一归还**：`Awaiter.GetResult`（finally）与 `Forget` 对 Builder 与 Manual body 一律归还池（原先仅 Builder）；`TGTask.FromResult/FromException/FromCanceled` 的 body 也随消费回池。双重归还由进入 try 前的 version 检查防护。
+- **IsCompleted version 校验**：`TGTask.IsCompleted` / `Awaiter.IsCompleted` 在 `Version != Body.Version`（body 已被消费归还）时返回 `true`，后续 `GetResult` 抛 `TGTaskExpiredException`——旧句柄不再可能读到复用 body 的他人状态（06/11 修复过的 bug 类从根上关闭）。
+- **TGTaskCompletionSource.Return 加 version 守卫**：body 已被消费侧归还后调用为 no-op，不再双重入池；仅「任务从未被 await」时仍是有效的手动归还路径。
+- **tcs 对象池化（非泛型）**：新增 internal `Rent()/Recycle()` 静态池（容量 64）；`TGTaskScheduler`（Yield/Delay/WaitForFrames 三类队列 + Shutdown）与 `TimerModuleAsyncExtensions`（WaitAsync/WaitUnscaledAsync）全部改用池化 tcs，SetResult 后立即回收——调度器热路径稳态零堆分配。
+- **WaitForFrames(0)** 改返回 `TGTask.CompletedTask`（零分配，语义不变）。
+
+### Verification
+
+- Unity EditMode：368/368 全绿（新增 `TGTaskPoolingLifecycleTests` 10 例：Manual/FromException 回池、双归还防护、过期句柄语义、调度器与 Timer 稳态池命中、Shutdown 取消回收）。
+- Shadow csproj `dotnet build` 通过，0 warning / 0 error。
+
+---
+
+## V2.1 — EventBus 零 GC 派发 + 生命周期策略 ✅（2026/06/13 收尾完成）
 
 > 2026/05/30 基于第二轮 AlicizaX / AmaniDawn·DGame 源码复核，吸收重入安全延迟增删模式，修正当前 `Publish` 每次 `ToArray()` 分配的问题，并补上参考框架都缺失的 handler 异常隔离。
+> 2026/06/13 收尾（C2 关单）：补 handler 异常上报钩子与派发递归深度护栏（来源参考 MyFramework EventSystem MAX_DEPTH，第三轮分析 §6ter）。
 
 ### Changed
 
@@ -16,11 +39,15 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 - **EventScope 边界测试**：补充已 Dispose scope 下订阅不残留 handler 的用例，继续保持 owner 显式 Dispose。
 - **EventHandlerRegistry 行为锁定**：补充 legacy duplicate registration 与 `ApplyAll` fail-fast 的测试。
 
+### Added（2026/06/13 收尾）
+
+- **`IEventModule.HandlerException` 事件**：每个被隔离的 handler 异常触发一次（事件类型 + 异常），钩子自身异常吞掉防级联；业务启动时订阅一次即可统一路由到 ILogger，handler 异常不再静默。
+- **Publish 递归深度护栏**：嵌套发布深度超过 `EventModule.MaxPublishDepth = 32` 抛 `InvalidOperationException`，防止事件互相触发形成无限递归导致栈溢出；嵌套场景下该异常被外层异常隔离捕获并上报。
+
 ### Verification
 
-- Shadow csproj：`dotnet build ServerProject/MyTryGetFramework.Core/MyTryGetFramework.Core.csproj` 通过，0 warning / 0 error。
-- 生成的测试 csproj：`dotnet build MyTryGetFramework.Tests.csproj` 通过，0 warning / 0 error；`dotnet test ...` 在该 Unity 生成 csproj 下未发现可执行测试（无输出/0 测试），不等价于 Unity EditMode 运行。
-- Unity EditMode 测试：需 Unity Editor 验证（本环境无法确认）。
+- Unity EditMode：368/368 全绿（新增 `EventModuleHardeningTests` 8 例：上报钩子、钩子异常不级联、自递归/互递归护栏、护栏触发后恢复正常）。
+- Shadow csproj `dotnet build` 通过，0 warning / 0 error。
 
 ---
 

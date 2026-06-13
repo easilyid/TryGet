@@ -436,6 +436,73 @@ AlicizaX 核心是 `Runtime/ABase/Service/Core/` 的一套 **三层作用域 Ser
 
 ---
 
+## 6ter. 第三轮参考框架分析（MyFramework 首析 + TryGet 自审 + 五框架定向复查，2026/06/13）
+
+> 本轮按 §11 模板对 `ReferenceFramework/MyFramework/`（ZHOURUIH/MyFramework）做首次源码级分析；同时对 TryGet Core 做实现状态自审（修正候选矩阵的陈旧标记），并带着「TGTask 池化技术债」「V2.3+ 契约设计」两个问题定向复查 hsenl/BigCat/TEngine。
+
+### 6ter.1 基本信息（MyFramework）
+
+| 项 | 内容 |
+|---|---|
+| 框架名称 | MyFramework（ZHOURUIH） |
+| 源码路径 | `ReferenceFramework/MyFramework/`（1016 cs；框架主体 `Assets/Scripts/Frame_HotFix/` 858 cs） |
+| 定位 | 纯客户端 Unity 商业级框架 + 工具链（MMORPG/传奇类商业项目验证） |
+| 是否依赖 Unity | 是（管理器层直接 using UnityEngine，无纯 C# 内核分层） |
+| ECS / Entity | 无（Character/MovableObject 是传统对象模型） |
+| 服务端 / 网络 | 仅客户端网络（NetPacketFactory/NetPacketTypeManager） |
+| 热更 / 资源工具链 | HybridCLR + Obfuz 热更分层；外置 C++ CodeGenerator 文件模板生成（UI/配置表/协议）；**Roslyn Analyzer 工程检查**（`Analyzers/AnalyzerUnity.dll`，源码在 `ToolProject/AnalyzerUnity/`） |
+
+### 6ter.2 MyFramework 关键源码证据与设计思想
+
+**架构总览**：五层装配体 `Frame_Base`（非热更基础）→ `Frame_HotFix`（热更框架层，主体）→ `HotFix`（热更业务）；`Frame_Game`→`Game`（非热更侧）。根容器 `GameFrameworkHotFix` 显式注册 50+ 个 `FrameSystem` 管理器（`Frame_HotFix/GameFramework/GameFrameworkHotFix.cs:377-434`），update/fixedUpdate/lateUpdate 三相派发、每管理器 `ProfilerScope` 包裹 + 初始化异常逐个隔离（`GameFrameworkHotFix.cs:330-345`）。
+
+逐设计点：
+
+1. **Roslyn Analyzer 框架契约检查（本轮最大发现）**：`ToolProject/AnalyzerUnity/AnalyzerUnity/AnalyzerResetProperty.cs:10-16` 定义 `RESET001`（**Error 级**）——任何实现 `resetProperty()` 的池化类，方法体内必须重置**全部非 static 实例字段**，漏一个字段直接编译失败；`AnalyzerCallBase.cs:9-15` 定义 `BASE001`——override 指定生命周期方法必须调 `base.X()`。这是「强生命周期控制」的编译期执法：池化对象状态残留这类最难排查的 bug 被消灭在编译期。**BigCat 仓库同样自带 `csharp/Analyzers/` 目录，双印证「框架自带 Analyzer」路线**。TryGet 已有 SourceGenerator 管线，补一个同管线的 Analyzer 成本低。→ **新增 Candidate 12**。
+2. **三条独立顺序轴 + 四段式初始化**：`registeFrameSystem<T>(callback, initOrder, updateOrder, destroyOrder)`（`GameFrameworkHotFix.cs:242-258`）允许 init/update/destroy 顺序各自独立——真实案例：ResourceManager 最先 init、最后 destroy（3000）；CommandSystem 在大部分管理器销毁后才销毁（2001）；GameSceneManager 最先 destroy（0）（`GameFrameworkHotFix.cs:379-433` 注释）。生命周期为 `preInitAsync→initAsync→init→lateInit`+`willDestroy→destroy` 两段销毁 +`resourceAvailable` 资源就绪钩子（`FrameSystem.cs:20-46`）。**观察**：TryGet「Shutdown=OnInit 逆序」在 95% 场景正确，但「日志/命令系统需要比逆序更晚销毁」是真实需求；暂不立候选，留作 ModuleSystem 未来压力测试用例。异步初始化段在 V2.4 资源 Adapter 落地时会成为真实需求（Module 启动期异步加载资产），届时再评估。
+3. **CommandSystem（招牌设计，确认不吸收，但有一个可剥离思想）**：池化 `Command : ClassObject`（`CommandSystem/Command.cs:5`）+ 延迟命令队列每帧扣减 delayTime（`CommandSystem.cs:23-56`）+ 跨线程输入缓冲（input/process 双列表 + 锁同步，`CommandSystem.cs:273-283`）。整套「方法调用对象化」的间接层与 TryGet 直接接口调用 + struct 事件方向相反，**不吸收**。可剥离的思想是**宿主销毁联动取消**：`notifyReceiverDestroied(receiver)` 把该接收者所有挂起延迟命令清掉（`CommandSystem.cs:243-271`）、`DelayCmdWatcher` 让发起者销毁时中断自己发出的命令——对应 TryGet 的真实空白：EventScope 管了事件订阅，但 **Timer/TGTask 没有 owner-scope 批量取消**（宿主 Procedure 退出后 pending Delay/Timer 仍会触发）。记入 §10 之外的观察项，待 V2.1/V2.3 出现真实泄漏案例再立候选。
+4. **EventSystem**：`TypeID<T>.ID` 静态泛型缓存做 type→int 零字典查找（`EventSystem/EventSystem.cs:95`）；**派发递归深度护栏** `MAX_DEPTH=20`，超限 logError 拒发（`EventSystem.cs:14,77-81,130-134`）——事件 A 的 handler 又发事件 B 形成环时不会栈溢出；per-handler try/catch 异常隔离（`EventSystem.cs:109-119`）；`unlistenEvent(listener)` 监听者批量解绑（`EventSystem.cs:193-209`，同 TEngine owner-clear，三印证）；事件参数对象池化复用（`ClassScope<T>`，`EventSystem.cs:62-66`）。**递归深度护栏是 TryGet EventModule 的真实缺口**（见 6ter.3），并入 C2 收尾。
+5. **ClassPool 泄漏检测**：编辑器模式维护 inuse/persistent-inuse 双列表 + 分配点堆栈快照（F4 开关，`Pool/ClassPool/ClassPool.cs:13-16,104`）；「帧临时对象」（onlyOnce）若下一帧仍在使用，update 里直接 logError 并打印**分配时堆栈**（`ClassPool.cs:30-53`）；每次分配发新 `assignID` 世代号（`ClassPool.cs:92`，`ClassObject.cs:8-11`）。「租借类别（帧临时/持久）+ 分配堆栈 + 世代号」三件套给 **C9** 提供了比快照计数更可执行的实现蓝本。
+6. **Scope 系列 RAII 借还**：`using var a = new ListScope<int>(out var list)`（`Scope/` 18 个文件）把池借还绑到 C# using 作用域，杜绝忘还——纯语法层技巧，TryGet PoolModule 成熟后可作为扩展 API 形态参考（C9 实现技巧，不单列候选）。
+7. **SceneProcedure 树形流程**：父子流程树，进子流程时父 `onExitToChild` 不销毁、子回父走 `onInitFromChild`（`GameScene/SceneProcedure.cs:8-52`）。与 TryGet 栈式 Procedure 是同问题的不同解；树形表达「共享父状态的兄弟流程」更强但复杂度高，**确认不吸收**（ADR 已选栈式，Push/Pop 可覆盖主要场景）。
+8. **DoubleBuffer / 各类 Thread 池**：多线程写单线程读的双缓冲（`DoubleBuffer/DoubleBuffer.cs:7-18`）——TryGet 单线程模型（ADR），**不吸收**；若 V2.7 网络 Adapter 要跨线程收包，这是 Adapter 层（非 Core）的现成参考。
+9. **代码生成工具链**：外置 C++ `ToolProject/CodeGenerator` 做文件模板生成（UI/配置表/协议），生成时机靠人工跑工具——比 TryGet 的 Roslyn 增量 SourceGen 落后一代，**机制不吸收**；其「生成物 + 注册逻辑一起生成」的完整性可在 V2.3 UI 代码生成时参考清单。
+
+### 6ter.3 TryGet Core 现状自审（修正候选矩阵陈旧标记）
+
+- **C2 实际已基本完成，矩阵标记过时**：`Runtime/Core/Event/EventModule.cs` 已实现重入安全延迟增删（`_pendingChanges`+`_dispatchDepth`，`EventModule.cs:120-174`）、per-handler 异常隔离（`EventModule.cs:100-110`）、零 ToArray 派发（索引循环）。**剩余缺口**：(a) handler 异常仅存入 `_lastPublishExceptions`（internal，`EventModule.cs:66-72`），生产路径上**静默吞掉**，无日志/钩子上报策略；(b) 无派发递归深度护栏（`_dispatchDepth` 只增减不设限）；(c) 文档/CHANGELOG 未声明完成。→ C2 收尾 = 异常上报策略 + 深度护栏 + 关单。
+- **C5 维持半成判断**：`ModuleRegistry` 仅 `Count`（`ModuleRegistry.cs:50`），`EventHandlerRegistry` 有 `Count+Snapshot`（`EventHandlerRegistry.cs:41-47`）；无重复注册检测、无可读 manifest 导出。
+- **TGTask 技术债定位坐实**：
+  - `TGTask.IsCompleted` 不校验 Version（`TGTask.cs:50-54`、Awaiter 同 `TGTask.cs:120-124`）——body 复用后旧句柄读到他人状态；
+  - Builder 型 body 已有消费侧归还（`Awaiter.GetResult` finally + `Forget`，`TGTask.cs:127-145,61-89`），**Manual 型（TGTaskCompletionSource）依赖显式 `Return()`，不调则 GC 兜底**（`TGTaskCompletionSource.cs:57-66`）；
+  - **调度器热路径双重逃逸**：`TGTaskScheduler` 每次 Yield/Delay/WaitForFrames `new TGTaskCompletionSource()`（tcs 本身堆分配，`TGTaskScheduler.cs:146,160,180`），SetResult 后因「外部还持 TGTask」不能立即 Return（`TGTaskScheduler.cs:260-267,281,297` 注释），body 全部漏给 GC——池化在最热路径完全失效；
+  - 帧边界启发式 `phase <= _lastProcessedPhase` 即新帧（`TGTaskScheduler.cs:226-237`）——真实 Unity 一帧多次 FixedUpdate 会误增 frameCount。
+
+### 6ter.4 定向复查发现（hsenl / BigCat / TEngine）
+
+- **hsenl HTask 的池化生命周期答案（TGTask 技术债的直接解法）**：`HTaskCompletionBody.SetResult/SetException` 在完成瞬间就 `IncrementVersion()`（`hsenl/.../HTask/HTaskBodys/HTaskCompletionBody.cs:62-83`）——**完成即失效**，所有旧句柄立刻过期；body 归还发生在**消费侧** `GetResult()` 的 try/finally（`HTaskCompletionBody.cs:39-60`），Manual（completion）型与 Builder 型同享此路径（`HTaskBody.cs:49,104`）；无人 await 且发生异常时，body 立即归还并原地 rethrow，不吞异常（`HTaskCompletionBody.cs:103-118`）。TryGet V0.6 只学了 HTask 的 struct+version 外形，没学完成即失效 + 消费侧归还的生命周期闭环。
+- **BigCat ValuePromise 印证**：`TimerMgr.Schedule` 用 `ValuePromise<T>.Acquire(out int rid, eventLoop)` 取池化 promise + 回收令牌 rid，任务对象自身也从 `taskPool.Acquire()`（`BigCat/csharp/Wjybxx.BigCat.Core/src/Co/TimerMgr.cs:44-56`）——「池化 promise + 令牌校验」与 hsenl 双印证。→ 合并立 **Candidate 11**。
+- **TEngine UI 契约层（V2.3 预研素材，非本期候选）**：`UnityProject/Assets/GameScripts/HotFix/GameLogic/Module/UIModule/` 的 `UIBase/UIWindow/UIWidget + WindowAttribute + IUIResourceLoader`（UIWindow.cs 523 行）给出了 UIWindow 生命周期、层级/全屏遮挡、资源加载 seam 的完整样板；强绑 Unity，届时只剥契约。
+
+### 6ter.5 可吸收点（汇入候选）
+
+| 设计点 | 来源（印证标注） | 符合 ADR-0020 | 映射候选 |
+|---|---|---|---|
+| TGTask 完成即失效（Version++ on complete）+ 消费侧统一归还 + tcs 池化 | hsenl HTaskCompletionBody + BigCat ValuePromise（双印证） | ✓ 纯 C# 可验证 | **C11（新增，P1）** |
+| Roslyn Analyzer 框架契约编译期执法（Reset 完整性/必须调 base 等） | MyFramework AnalyzerUnity + BigCat Analyzers（双印证） | ✓ tooling 可验证 | **C12（新增，P2）** |
+| EventBus 派发递归深度护栏 | MyFramework EventSystem MAX_DEPTH | ✓ 纯 C# 可验证 | **C2 收尾项** |
+| handler 异常上报策略（替代静默吞掉） | MyFramework logException / TGTask UnobservedException 同型 | ✓ 纯 C# 可验证 | **C2 收尾项** |
+| 池租借类别（帧临时/持久）+ 分配堆栈 + 世代号泄漏检测 | MyFramework ClassPool（强化 AlicizaX/DGame 双印证的 C9） | ✓ 纯 C#（堆栈捕获仅 DEBUG） | **C9（强化）** |
+| 宿主销毁联动取消（owner-scope 批量取消 pending 异步/定时器） | MyFramework DelayCmdWatcher/notifyReceiverDestroied | ✓ 需设计 | 观察项（待真实泄漏案例） |
+| init/destroy 顺序解耦的真实案例集 | MyFramework 三顺序轴 | — | 观察项（ModuleSystem 压力测试用例） |
+
+### 6ter.6 不吸收点（红线/不符）
+
+- MyFramework：CommandSystem 整套「调用对象化」间接层（与直接接口+struct 事件方向相反）、静态全局 `FrameBaseHotFix` 单例族 + 管理器直接 using UnityEngine（无纯 C# 内核）、`TypeID` 弱类型 int 事件 ID（TryGet 用 struct 类型本身）、树形 SceneProcedure（已选栈式）、DoubleBuffer/Thread 池（单线程模型红线）、C++ 文件模板代码生成（Roslyn SourceGen 更先进）、HybridCLR/Obfuz 热更绑定（V2.8 前不碰）。
+- 复查确认无新增吸收：TEngine/DGame 的 UI/资源/热更运行时（强绑 Unity，留作 V2.3-V2.8 Adapter 期参考）；hsenl HTaskCompletionBody 的 lock/ManualResetEventSlim 线程同步部分（TryGet 单线程模型，只取 version/归还语义，不取线程安全机制）。
+
+---
+
 ## 7. 当前 TryGet Core 摩擦
 
 ### 7.1 FrameLoop Interface 还不够 deep
@@ -538,9 +605,9 @@ AlicizaX 核心是 `Runtime/ABase/Service/Core/` 的一套 **三层作用域 Ser
 
 ---
 
-### Candidate 2 — EventBus Lifecycle Policy
+### Candidate 2 — EventBus Lifecycle Policy ✅ **已完成（2026/06/13 关单）**
 
-**设计文档**：`docs/design/V2.1-eventbus-zero-gc-lifecycle.md`（Implemented，2026/05/30 核心最小闭环；Shadow csproj + tests csproj build 通过，Unity EditMode 运行待 Editor 验证）。
+**设计文档**：`docs/design/V2.1-eventbus-zero-gc-lifecycle.md`（核心最小闭环 2026/05/30 落地；2026/06/13 收尾补 `IEventModule.HandlerException` 异常上报钩子 + `MaxPublishDepth=32` 递归深度护栏，Unity EditMode 368/368 全绿验证，见 CHANGELOG V2.1 段）。
 
 **来源参考**：TEngine GameEvent owner-clear，hsenl EventSystem 注册目录；第二轮强化吸收 AlicizaX PendingChange / DGame EventDelegateData 的重入安全延迟增删，并补上两者缺失的 handler 异常隔离。
 
@@ -853,6 +920,73 @@ TryGet 的 `EventHandlerGenerator`/`ModuleManifestGenerator` 对非法输入（�
 
 ---
 
+### Candidate 11 — TGTask Pooling Lifecycle Closure（池化生命周期收口：完成即失效 + 消费侧归还）✅ **已完成（2026/06/13）**
+
+> **实施时设计调整**：草案中的「SetResult/SetException 时 Version++（完成即失效）」评审后未采用——它会破坏已钉住的 tcs TrySet 静默语义并引入 version+1 算术脆弱性。实际落地为「消费侧统一归还（Builder+Manual）+ 全路径 version 校验 + tcs 对象池化」，达成同等安全性，全部既有行为兼容（Unity EditMode 368/368）。详见 CHANGELOG「V2.0 — C11」段与 `.scratch/c2-c11-hardening/issues/02`。
+
+**来源参考**：hsenl HTaskCompletionBody（完成瞬间 `IncrementVersion` + `GetResult` finally `ReturnBody`，`HTaskCompletionBody.cs:39-83`）+ BigCat `ValuePromise<T>.Acquire(out int rid)` 池化 promise + 回收令牌（`TimerMgr.cs:44-56`）。**双印证**。
+
+**必要性**：
+
+6ter.3 自审坐实三项关联技术债：① `TGTask.IsCompleted` 不校验 Version（`TGTask.cs:50-54`），body 复用后旧句柄读到他人状态；② Manual 型 body 依赖显式 `Return()` 否则漏给 GC（`TGTaskCompletionSource.cs:57-66`）；③ TGTaskScheduler 热路径每次 Yield/Delay `new TGTaskCompletionSource()` 且 SetResult 后无法安全归还（`TGTaskScheduler.cs:146,160,180,260-267`）——池化在最热路径完全失效。根因相同：**TryGet 的 Version 在 Reset（归还）时才递增，归还时机无人能定**；hsenl 的答案是把失效提前到完成瞬间，归还统一放到消费侧。
+
+**范围**：
+
+- `TGTaskBody.SetResult/SetException` 时 Version++（完成即失效）；`GetResult` 改为按快照 version 校验。
+- `Awaiter.GetResult` 的 finally 归还**统一覆盖 Builder 与 Manual 型**；`Forget` 路径同步调整。
+- `IsCompleted`（TGTask 与 Awaiter）补 Version 校验：`Version != Body.Version` 视为已完成（过期=已消费）。
+- `TGTaskCompletionSource` 池化（对象本身可复用，Acquire/内部回收），删除公开 `Return()` 或降级为 no-op 兼容；TGTaskScheduler 三类队列改用池化 tcs。
+- 无人 await 且异常的路径对齐 hsenl：进 `UnobservedException` 钩子后立即归还 body。
+- **不取** hsenl 的 lock/ManualResetEventSlim 线程同步（单线程模型）。
+
+**预期收益**：
+
+- 热路径（每帧 Yield/Delay）回到零稳态分配，池化真实生效。
+- 旧句柄误读他人状态从「隐患」变为「确定抛 Expired/视为完成」。
+- 删除「何时该调 tcs.Return()」这一无法回答的 API 心智负担。
+
+**验证标准**：
+
+- 完成后旧 TGTask 句柄的 IsCompleted/GetResult 行为有明确定义并有测试。
+- Yield/Delay 循环 N 帧后池命中率 100%（无新 body/tcs 分配）。
+- 现有 350 个 EditMode 测试全绿（语义兼容）；ServerProject shadow csproj 可编译。
+
+**优先级**：**P1**（修复已知最高优先级技术债，且是 V2.1 事件升级前的地基）。
+
+---
+
+### Candidate 12 — Framework Contract Analyzer（Roslyn Analyzer 框架契约编译期执法）
+
+**来源参考**：MyFramework `AnalyzerUnity`（RESET001 池化类 resetProperty 必须重置全部实例字段、BASE001 override 必须调 base，均 Error 级，`ToolProject/AnalyzerUnity/AnalyzerUnity/AnalyzerResetProperty.cs:10-16`、`AnalyzerCallBase.cs:9-15`）+ BigCat 自带 `csharp/Analyzers/`。**双印证**。
+
+> 与 C10（SourceGen 对非法输入 ReportDiagnostic）同属编译期诊断，但方向相反：C10 管「生成器输入合法性」，本候选管「业务代码遵守框架契约」。两者共享 Roslyn tooling 管线，可同一迭代实施。
+
+**必要性**：
+
+TryGet 的框架契约目前只靠文档和运行时异常兜底：事件类型必须是 struct（违者编译器报泛型约束错误，但提示晦涩）、`IObjectPool` 的 Reset 委托应清干净状态（漏字段=池化对象状态残留，最难排查的一类 bug）、`[Module]` 类的服务接口注册约束等。MyFramework 证明了把这类契约做成 Error 级 Analyzer 后，整类 bug 在编译期消失。TryGet 已有 SourceGenerator 工程（`Runtime/Core/Generators/`），追加 Analyzer 是同管线增量成本。
+
+**范围**（首批规则按真实痛点裁剪，宁缺勿滥）：
+
+- TG-A001：池化对象的 Reset 路径未覆盖全部实例字段（对标 RESET001；具体绑定形态待 C9/池 API 定型后细化）。
+- TG-A002：`[EventHandler]` 方法签名/static 约束（与 C10 生成器诊断互补，Analyzer 在 IDE 即时红线）。
+- TG-A003：Core 程序集内 `using UnityEngine`（把 Shadow csproj 的事后验证提前到 IDE）。
+- GeneratorDriver/AnalyzerVerifier 单测覆盖；规则文档化（ID/severity/理由）。
+
+**预期收益**：
+
+- 框架契约从「文档约定」升级为「编译期执法」，违约成本前移。
+- ADR-0012 纯 C# 边界获得 IDE 即时反馈，不再依赖 CI 阶段 shadow build 才发现。
+
+**验证标准**：
+
+- 违规代码触发预期诊断 ID + Location；合法代码零误报。
+- Analyzer 单测（Microsoft.CodeAnalysis.Testing）全绿。
+- 不进 Core 运行时（纯 tooling）。
+
+**优先级**：P2（与 C10 同迭代实施摊薄成本）。
+
+---
+
 ## 9. 推荐迭代顺序
 
 推荐顺序：
@@ -886,6 +1020,18 @@ TryGet 的 `EventHandlerGenerator`/`ModuleManifestGenerator` 对非法输入（�
 
 10. **前置决策门 — Service Scope Layering（Candidate 8，新增）**
     架构级，与「ModuleHost 单一容器」有张力。等 V2.3 UI / V2.5 场景真实需求出现、并先定 ADR 是否允许分层容器后再评估。
+
+### 9bis. 第三轮后的推荐顺序（2026/06/13 更新）
+
+C1/C3/C7 已落地；6ter.3 自审发现 C2 已基本完成（仅剩收尾）。当前推荐：
+
+1. **P1 — C2 收尾（小）** ✅ **已完成（2026/06/13，同日实施）**：HandlerException 上报钩子 + MaxPublishDepth=32 递归护栏 + 关单，EditMode 368/368 验证。
+2. **P1 — C11 TGTask 池化生命周期收口（本轮主菜）** ✅ **已完成（2026/06/13，同日实施）**：消费侧统一归还 + 全路径 version 校验 + tcs 池化（设计调整见 Candidate 11 注记），调度器热路径稳态零分配。
+3. **P2 — C10 + C12 同迭代（Roslyn tooling 双件套）**：SourceGen 输入诊断 + 框架契约 Analyzer，共享管线摊薄成本。**← 下一个迭代起点**
+4. **P2 — C4 Procedure Transition Result**、**C5 Registry 诊断**：顺位不变。
+5. **P3 — C9（已获 MyFramework ClassPool 蓝本强化）、C6**：等真实需求。
+6. **决策门 — C8**：不变，等 V2.3/V2.5。
+7. **观察项（不立候选）**：owner-scope 异步/定时器批量取消（MyFramework DelayCmdWatcher 思想）、Module 异步初始化段与 destroy 顺序解耦（V2.4 资源 Adapter 期再评估）、TGTaskScheduler 帧边界启发式误判（C11 实施时审视过，保持现状：真实 Unity 接入时由 ModuleSystem 显式通知帧首再修）。
 
 ---
 
@@ -1014,3 +1160,10 @@ Candidate 1 FrameLoop 已于 2026/05/30（提交 0bfc33f）落地。第二轮分
 实现纪律重申：AlicizaX 的 Mono\* 驱动层 / AppServices 静态单例 / Cysharp.Text 依赖、DGame 的静态 ModuleSystem / 弱类型 int eventId 均为红线，吸收时只取纯 C# 机制、剥离 Unity 与第三方依赖、保持 ServerProject shadow csproj 可验证。
 
 **第二轮推荐起点**：进入实现时从 **Candidate 2（EventBus 零 GC + 生命周期，含异常隔离）** 开始——它是 P1、有真实 GC 靶点、双框架印证了实现模式、且 FrameLoop 已为其铺好基础。
+
+### 12ter. 第三轮（MyFramework 首析 + 自审 + 定向复查，2026/06/13）增量结论
+
+1. **C2 的主体已在 v2.0-route-c-landing 分支落地**（延迟增删/重入安全/异常隔离/零 ToArray 均有实现与测试），第二轮「从 C2 开始」的建议已被执行过半；剩余为异常上报策略 + 递归深度护栏 + 关单，半天量级。
+2. **本轮最高价值发现是 C11（TGTask 池化生命周期收口）**：hsenl 的「完成即失效 + 消费侧归还」与 BigCat 的「池化 promise + 回收令牌」双印证了同一答案，直接对症 TryGet 三项关联技术债——这是当前唯一的 P1 级架构债，建议作为下一个实现迭代的主体。
+3. **MyFramework 的独特贡献不在运行时而在工程化**：Roslyn Analyzer 契约执法（C12，与 BigCat 双印证）、池泄漏检测三件套（强化 C9）、事件递归护栏（并入 C2）。其运行时设计（CommandSystem/静态单例/树形流程/弱类型事件）全部确认不吸收——它是「同一问题域的反方向解」，价值在于校准 TryGet 的取舍而非提供实现。
+4. 修订后的近期路径：**C2 收尾 → C11 → C10+C12 → C4/C5**。V2.3 UI 期再启用 TEngine UIModule 契约样板与 C8 决策门。
