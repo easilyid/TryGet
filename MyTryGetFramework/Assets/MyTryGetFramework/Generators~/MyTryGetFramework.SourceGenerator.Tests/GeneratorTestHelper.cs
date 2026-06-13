@@ -19,6 +19,7 @@ namespace TryGet.SourceGenerator.Tests
         /// <summary>
         /// 最小 TryGet 运行时桩。仅含生成器输出代码与被测 attribute 所需的类型，
         /// 形状与 Core 真实定义（IModuleSystem.Register&lt;T&gt; where T:class,IModule 等）一致。
+        /// C5 起：包含 RegisterWithMetadata（双轨 API）。
         /// </summary>
         public const string TryGetStub = @"
 using System;
@@ -31,8 +32,14 @@ namespace TryGet
     public sealed class ModuleAttribute : Attribute { public ModuleAttribute(Type serviceType) {} }
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
     public sealed class EventHandlerAttribute : Attribute {}
-    public static class ModuleRegistry { public static void Register(Action<IModuleSystem> registration) {} }
-    public static class EventHandlerRegistry { public static void Register(Action<IEventModule> registration) {} }
+    public static class ModuleRegistry {
+        public static void RegisterWithMetadata(Type implType, Type serviceType, string asm) {}
+        public static void Register(Action<IModuleSystem> registration) {}
+    }
+    public static class EventHandlerRegistry {
+        public static void RegisterWithMetadata(string sig, Type eventType, string asm) {}
+        public static void Register(Action<IEventModule> registration) {}
+    }
 }";
 
         public sealed class Result

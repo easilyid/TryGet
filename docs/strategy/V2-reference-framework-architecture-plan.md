@@ -711,35 +711,41 @@ AlicizaX 核心是 `Runtime/ABase/Service/Core/` 的一套 **三层作用域 Ser
 
 ---
 
-### Candidate 5 — Generated Registry Diagnostics
+### Candidate 5 — Generated Registry Diagnostics ← **下一迭代起点（2026/06/13）**
 
 **来源参考**：hsenl Attribute registry，Fantasy Source Generator 自动注册思想。
 
-**必要性**：
+**必要性**（2026/06/13 重评 + 真实靶点确认）：
 
-当前 Source Generator 注册表只是 ApplyAll，出错时不易定位生成了什么、重复注册了什么、是否漏注册。
+当前 Source Generator 注册表只是 ApplyAll 黑盒，**有真实正确性缺口**：
 
-**范围**：
+- `ModuleRegistry` 只有 `Count`，**无重复注册检测**。两个 `[Module]` 标到同一服务接口、或同程序集被扫两次，会堆积重复委托，`ApplyAll` 时第二个委托执行 `host.Register` 才抛 `ModuleAlreadyRegisteredException`——**错误暴露点远离根因，且信息晦涩**（不显示哪个类重复）。
+- `EventHandlerRegistry.Snapshot()` 返回 `IReadOnlyList<Action<IEventModule>>`——一堆不透明委托，**完全无法诊断”注册了哪些 handler”**。
+- 重复注册策略未定义（应前移检测到 registry 层，还是放任到 ModuleSystem.Register 才报错？草案明确要求”明确重复注册策略”）。
 
-- `AssemblyManifestRegistry` 增加只读诊断快照。
-- `EventHandlerRegistry` 增加 handler 诊断快照。
-- 明确重复注册策略。
-- 增加 registry 单元测试。
+**范围**（聚焦可观察性 + 重复策略前移）：
+
+- `ModuleRegistry` 增加只读诊断快照（含类型 / 服务接口 / 来源 assembly）。
+- `EventHandlerRegistry` 增加只读诊断快照（含 handler 签名 / 事件类型 / 来源 assembly）。
+- 明确重复注册策略：前移到 registry 层检测 + 抛异常（带清晰定位：哪个类、哪个服务接口、来源 assembly），或 last-win 静默覆盖（需参考框架佐证）。
+- 增加 registry 单元测试（重复注册、Snapshot 一致性、ApplyAll 幂等性）。
 - 不引入运行时反射扫描。
 
 **预期收益**：
 
-- 提高 Source Generator seam 的可观察性。
-- 方便未来热更程序集 / 多程序集注册分析。
-- 减少自动注册“黑盒感”。
+- 提高 Source Generator seam 的可观察性（调试时可 `ModuleRegistry.Snapshot()` 看注册了什么）。
+- 重复注册错误提前、定位清晰（从”运行时 ModuleAlreadyRegisteredException”提升到”registry 层带来源 assembly 的明确异常”）。
+- 方便未来热更程序集 / 多程序集注册分析（例：哪些 Module 来自热更层、哪些来自主包）。
+- 减少自动注册”黑盒感”。
 
 **验证标准**：
 
-- 注册项数量可查询。
-- 重复注册行为可测。
-- ApplyAll 后不会改变诊断一致性。
+- 注册项数量可查询，Snapshot 返回结构化信息（非不透明委托）。
+- 重复注册行为可测（明确触发点 + 异常 message 含定位）。
+- ApplyAll 后 Snapshot 不会改变诊断一致性。
+- 单测覆盖重复注册、跨 assembly 注册、Snapshot/ApplyAll 幂等性。
 
-**优先级**：P2。
+**优先级**：**P1**（从 P2 提升，取代 C12 成为下一个起点——C12 裁决后，C5 是唯一有真实正确性靶点的编译期/注册基建候选）。
 
 ---
 
@@ -957,35 +963,25 @@ TryGet 的 `EventHandlerGenerator`/`ModuleManifestGenerator` 对非法输入（�
 
 ---
 
-### Candidate 12 — Framework Contract Analyzer（Roslyn Analyzer 框架契约编译期执法）
+### Candidate 12 — Framework Contract Analyzer ❌ **已裁决退役（2026/06/13）**
 
-**来源参考**：MyFramework `AnalyzerUnity`（RESET001 池化类 resetProperty 必须重置全部实例字段、BASE001 override 必须调 base，均 Error 级，`ToolProject/AnalyzerUnity/AnalyzerUnity/AnalyzerResetProperty.cs:10-16`、`AnalyzerCallBase.cs:9-15`）+ BigCat 自带 `csharp/Analyzers/`。**双印证**。
+**来源参考**：MyFramework `AnalyzerUnity`（RESET001 池化类 resetProperty 必须重置全部实例字段、BASE001 override 必须调 base，均 Error 级）+ BigCat 自带 `csharp/Analyzers/`。
 
-> 与 C10（SourceGen 对非法输入 ReportDiagnostic）同属编译期诊断，但方向相反：C10 管「生成器输入合法性」，本候选管「业务代码遵守框架契约」。两者共享 Roslyn tooling 管线，可同一迭代实施。
+> **裁决（2026/06/13）**：草案三条规则（TG-A001/A002/A003）逐条用真实代码验证后，**全部冗余或无靶点，净价值为零**。不实施。
 
-**必要性**：
+**裁决依据**：
 
-TryGet 的框架契约目前只靠文档和运行时异常兜底：事件类型必须是 struct（违者编译器报泛型约束错误，但提示晦涩）、`IObjectPool` 的 Reset 委托应清干净状态（漏字段=池化对象状态残留，最难排查的一类 bug）、`[Module]` 类的服务接口注册约束等。MyFramework 证明了把这类契约做成 Error 级 Analyzer 后，整类 bug 在编译期消失。TryGet 已有 SourceGenerator 工程（`Runtime/Core/Generators/`），追加 Analyzer 是同管线增量成本。
+- **TG-A003（Core 禁 `using UnityEngine`）已被三重覆盖**：Core asmdef 是 `noEngineReferences: true`，Unity 编译时根本没 UnityEngine 引用——`using UnityEngine` 在 Unity 里直接编译失败、IDE 已实时红线（草案说的"提前到 IDE"已由 asmdef 免费实现）。Shadow csproj 在 .NET 端三重兜底。零增量价值。
+- **TG-A002（`[EventHandler]` 签名/static）与 C10 完全重叠**：C10 的生成器诊断（TG0004-0006）已在编译期对非法 handler 报错，增量生成器诊断本来就在 IDE 实时显示、不是"事后"。再做 Analyzer 纯属冗余。
+- **TG-A001（池 Reset 字段覆盖）在 TryGet 没有靶点**：MyFramework 的 RESET001 成立因其有 `resetProperty()` 虚方法约定可分析；**TryGet `PoolModule` 用委托式 `Action<T> onReturn` 回调**，无任何可静态分析的 reset 方法。草案自己写"绑定形态待池 API 定型后细化"——即当前无目标。
 
-**范围**（首批规则按真实痛点裁剪，宁缺勿滥）：
+**建议替代**：C5（注册表诊断）有真实正确性靶点（重复注册策略缺失、registry 只写黑盒），优先级提升为下一个迭代起点。
 
-- TG-A001：池化对象的 Reset 路径未覆盖全部实例字段（对标 RESET001；具体绑定形态待 C9/池 API 定型后细化）。
-- TG-A002：`[EventHandler]` 方法签名/static 约束（与 C10 生成器诊断互补，Analyzer 在 IDE 即时红线）。
-- TG-A003：Core 程序集内 `using UnityEngine`（把 Shadow csproj 的事后验证提前到 IDE）。
-- GeneratorDriver/AnalyzerVerifier 单测覆盖；规则文档化（ID/severity/理由）。
+**原草案定义**（存档）：
 
-**预期收益**：
+与 C10（SourceGen 对非法输入 ReportDiagnostic）同属编译期诊断，但方向相反：C10 管「生成器输入合法性」，本候选管「业务代码遵守框架契约」。两者共享 Roslyn tooling 管线。
 
-- 框架契约从「文档约定」升级为「编译期执法」，违约成本前移。
-- ADR-0012 纯 C# 边界获得 IDE 即时反馈，不再依赖 CI 阶段 shadow build 才发现。
-
-**验证标准**：
-
-- 违规代码触发预期诊断 ID + Location；合法代码零误报。
-- Analyzer 单测（Microsoft.CodeAnalysis.Testing）全绿。
-- 不进 Core 运行时（纯 tooling）。
-
-**优先级**：P2（与 C10 同迭代实施摊薄成本）。
+草案范围：TG-A001（池化对象 Reset 路径未覆盖全部实例字段，对标 RESET001）、TG-A002（[EventHandler] 方法签名/static 约束，与 C10 生成器诊断互补）、TG-A003（Core 程序集内 `using UnityEngine`，把 Shadow csproj 事后验证提前到 IDE）；GeneratorDriver/AnalyzerVerifier 单测覆盖；规则文档化（ID/severity/理由）。草案优先级 P2。
 
 ---
 

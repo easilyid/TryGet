@@ -8,7 +8,8 @@ namespace TryGet
     ///
     /// 工作流：
     /// 1. 生成的 <c>__AssemblyManifest_&lt;asm&gt;</c> 类在 <c>[ModuleInitializer]</c> /
-    ///    <c>[RuntimeInitializeOnLoadMethod]</c> 触发时调 <see cref="Register"/> 注册一个委托
+    ///    <c>[RuntimeInitializeOnLoadMethod]</c> 触发时调 <see cref="RegisterWithMetadata"/> +
+    ///    <see cref="Register"/> 注册元数据 + 执行委托（双轨：新生成器生成双调用、旧生成代码只调 Register 仍可用）
     /// 2. <see cref="GameLauncher.CreateHost"/> 在 host 基础服务注册完成后调 <see cref="ApplyAll"/>
     ///    把累计的所有委托应用到新 host 上
     /// 3. 业务可继续手动 <see cref="IModuleSystem.Register{T}"/> 自己的 Module
@@ -23,6 +24,19 @@ namespace TryGet
     public static class ModuleRegistry
     {
         private static readonly List<Action<IModuleSystem>> _registrations = new List<Action<IModuleSystem>>();
+        private static readonly List<ModuleRegistrationInfo> _metadata = new List<ModuleRegistrationInfo>();
+
+        /// <summary>
+        /// C5：注册 Module 的结构化元数据（类型/服务接口/来源 assembly）。
+        /// 生成代码在调 <see cref="Register"/> 前先调此方法，让 <see cref="Snapshot"/> 可返回结构化信息。
+        /// 手动调用（业务代码）可选——不调只会让该注册在 Snapshot 中显示为 unknown 来源，不影响功能。
+        /// </summary>
+        public static void RegisterWithMetadata(Type implementationType, Type serviceType, string sourceAssembly)
+        {
+            if (implementationType == null) throw new ArgumentNullException(nameof(implementationType));
+            if (serviceType == null) throw new ArgumentNullException(nameof(serviceType));
+            _metadata.Add(new ModuleRegistrationInfo(implementationType, serviceType, sourceAssembly));
+        }
 
         /// <summary>
         /// 注册一个 Module-注册委托。生成代码（<c>__AssemblyManifest_&lt;asm&gt;</c>）调此方法。
@@ -50,11 +64,31 @@ namespace TryGet
         public static int Count => _registrations.Count;
 
         /// <summary>
+        /// C5：获取当前注册的结构化快照（类型/服务接口/来源 assembly）。
+        /// 旧生成代码（只调 <see cref="Register"/>、未调 <see cref="RegisterWithMetadata"/>）的注册
+        /// 会显示为 implementationType/serviceType=null、sourceAssembly="unknown"。
+        /// </summary>
+        public static IReadOnlyList<ModuleRegistrationInfo> Snapshot()
+        {
+            // _metadata.Count 可能 < _registrations.Count（旧生成代码或手动注册未调 RegisterWithMetadata）
+            var result = new ModuleRegistrationInfo[_registrations.Count];
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (i < _metadata.Count)
+                    result[i] = _metadata[i];
+                else
+                    result[i] = new ModuleRegistrationInfo(null, null, "unknown");
+            }
+            return result;
+        }
+
+        /// <summary>
         /// 测试用：清空所有注册（生产代码不应调用）。
         /// </summary>
         internal static void ClearForTests()
         {
             _registrations.Clear();
+            _metadata.Clear();
         }
     }
 }

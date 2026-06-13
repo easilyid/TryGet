@@ -4,6 +4,40 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — C5 Registry 诊断快照（结构化可观察性）
+
+> 2026/06/13。C12 裁决退役后转做 C5——补 ModuleRegistry/EventHandlerRegistry 结构化 Snapshot + 双轨 API 向后兼容。
+
+### Added
+
+- **ModuleRegistry / EventHandlerRegistry 双轨 API**：新增 `RegisterWithMetadata(类型/签名, 事件类型, 来源assembly)` + 保留旧 `Register(委托)`（向后兼容）。生成器生成双调用，旧生成代码（只调 `Register`）仍可用，Snapshot 中显示为 "unknown"。
+- **Snapshot 结构化返回**：
+  - `ModuleRegistry.Snapshot()` → `IReadOnlyList<ModuleRegistrationInfo>`（含 `ImplementationType` / `ServiceType` / `SourceAssembly`）
+  - `EventHandlerRegistry.Snapshot()` → `IReadOnlyList<EventHandlerRegistrationInfo>`（含 `HandlerSignature` / `EventType` / `SourceAssembly`）
+  - 替代旧的 `IReadOnlyList<Action<T>>` 不透明委托，支持调试时查看"注册了哪些 Module/Handler、来自哪个 assembly"。
+- **生成器输出双轨调用**：`ModuleManifestGenerator` / `EventHandlerGenerator` 在生成的 manifest 中先调 `RegisterWithMetadata`（元数据）、再调 `Register`（执行委托），元数据与执行分离存储。
+- **C5 测试覆盖**：`RegistryDiagnosticsTests` 9 例（Snapshot 结构化验证、旧生成器兼容、allow-multiple 策略、ApplyAll 幂等性）。
+
+### Fixed
+
+- **EventTests 旧测试更新**：`EventHandlerRegistry_Snapshot_ReturnsRegisteredHandlers` 适配 C5 新返回类型（旧测期望委托数组、改为验证结构化信息）。
+
+### Changed
+
+- **重复注册策略明确为 allow-multiple**（与现有 `EventTests.AllowsLegacyDuplicates` 一致）：registry 层允许堆积重复注册，重复检测留给 `ModuleSystem.Register` / `EventModule.Subscribe` 层（运行时抛 `ModuleAlreadyRegisteredException` 等）。策略理由：(1) 纯客户端框架、生成器触发在启动时，重复几乎必然是代码错误而非动态需求；(2) allow-multiple 简化 registry 实现、无需类型比较逻辑；(3) 错误仍能被捕获（只是暴露点在 ApplyAll 而非 Register），且 Snapshot 可诊断来源。
+
+### Verification
+
+- Unity EditMode：389/389（+9 C5 测试）；Shadow csproj `dotnet build` 0 错误；Samples/Net 端到端跑通（生成器双轨 API 生效）。
+- 生成器测试：12/12（`GeneratorTestHelper` 的 `TryGetStub` 补 `RegisterWithMetadata` 桩）。
+
+### Design Notes
+
+- **C12 裁决退役**（2026/06/13）：草案三条规则（TG-A001/A002/A003）逐条用真实代码验证后全部冗余或无靶点——TG-A003 已被 Core asmdef `noEngineReferences: true` 覆盖（Unity 编译时无 UnityEngine 引用、IDE 已实时红线）；TG-A002 与 C10 生成器诊断完全重叠；TG-A001 在 TryGet 无靶点（`PoolModule` 用委托式 `Action<T> onReturn`、无可静态分析的 reset 方法）。不实施，避免做无用功。裁决依据记录于 `docs/strategy/V2-reference-framework-architecture-plan.md`。
+- **C5 双轨迁移模式**：新生成器生成双调用（`RegisterWithMetadata` + `Register`），registry 同时支持新旧路径。旧生成代码（已编译 assembly、只有 `Register(action)`）仍可用，只是 Snapshot 里显示为 "unknown" 来源，不影响功能。这是标准向后兼容策略。
+
+---
+
 ## V2.0 — 自审修复：C4 transition 取消 + Samples/Net 复活
 
 > 2026/06/13。对本轮（C2/C11/C10/生成器迁移/C4）产出做系统性自审，发现并修复 4 个问题，其中 2 个是真实 bug/损坏。

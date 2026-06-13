@@ -378,10 +378,16 @@ namespace TryGet.Tests
             EventHandlerRegistry.ClearForTests();
             Action<IEventModule> registration = bus => bus.Subscribe<DamageEvent>(_ => { });
 
+            // C5：只调 Register（未调 RegisterWithMetadata）模拟旧生成器
             EventHandlerRegistry.Register(registration);
 
             Assert.AreEqual(1, EventHandlerRegistry.Count);
-            CollectionAssert.AreEqual(new[] { registration }, EventHandlerRegistry.Snapshot());
+            var snapshot = EventHandlerRegistry.Snapshot();
+            Assert.AreEqual(1, snapshot.Count);
+            // 旧生成代码未调 RegisterWithMetadata，Snapshot 显示 unknown
+            Assert.AreEqual("unknown", snapshot[0].HandlerSignature);
+            Assert.IsNull(snapshot[0].EventType);
+            Assert.AreEqual("unknown", snapshot[0].SourceAssembly);
 
             EventHandlerRegistry.ClearForTests();
         }
