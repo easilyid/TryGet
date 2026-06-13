@@ -21,7 +21,8 @@ namespace TryGet.Async
 
         // 全局时间和帧计数
         private long _frameCount;
-        private float _elapsedTime;
+        private float _elapsedTime;         // Scaled time（受 Time.timeScale 影响）
+        private float _unscaledElapsedTime; // C3：Unscaled time（真实时间）
 
         // 用于基于 Phase 顺序判断帧边界。
         // 规则：
@@ -72,7 +73,13 @@ namespace TryGet.Async
         {
             public readonly TGTaskCompletionSource Tcs;
             public readonly float DueTime;
-            public DelayedEntry(TGTaskCompletionSource tcs, float dueTime) { Tcs = tcs; DueTime = dueTime; }
+            public readonly TimeMode TimeMode; // C3：区分 Scaled / Unscaled
+            public DelayedEntry(TGTaskCompletionSource tcs, float dueTime, TimeMode timeMode)
+            {
+                Tcs = tcs;
+                DueTime = dueTime;
+                TimeMode = timeMode;
+            }
         }
 
         private readonly struct FrameEntry
@@ -130,6 +137,7 @@ namespace TryGet.Async
             }
 
             _elapsedTime = 0;
+            _unscaledElapsedTime = 0;
             _frameCount = 0;
             _lastProcessedPhase = FramePhase.EndOfFrame;
         }
@@ -156,6 +164,16 @@ namespace TryGet.Async
 
         public TGTask Delay(float seconds, FramePhase phase)
         {
+            return Delay(seconds, phase, TimeMode.Scaled);
+        }
+
+        public TGTask Delay(float seconds, TimeMode timeMode)
+        {
+            return Delay(seconds, FramePhase.Update, timeMode);
+        }
+
+        public TGTask Delay(float seconds, FramePhase phase, TimeMode timeMode)
+        {
             if (seconds < 0) throw new ArgumentOutOfRangeException(nameof(seconds), "Delay seconds must be >= 0");
             var tcs = TGTaskCompletionSource.Rent();
             var task = tcs.Task;
@@ -165,7 +183,10 @@ namespace TryGet.Async
             }
             else
             {
-                _delayQueuesByPhase[phase].Add(new DelayedEntry(tcs, _elapsedTime + seconds));
+                float dueTime = timeMode == TimeMode.Scaled
+                    ? _elapsedTime + seconds
+                    : _unscaledElapsedTime + seconds;
+                _delayQueuesByPhase[phase].Add(new DelayedEntry(tcs, dueTime, timeMode));
             }
             return task;
         }
@@ -199,32 +220,32 @@ namespace TryGet.Async
 
         public void EarlyUpdate(float deltaTime, float unscaledDeltaTime)
         {
-            ProcessPhase(FramePhase.EarlyUpdate, deltaTime);
+            ProcessPhase(FramePhase.EarlyUpdate, deltaTime, unscaledDeltaTime);
         }
 
         public void FixedUpdate(float deltaTime, float unscaledDeltaTime)
         {
-            ProcessPhase(FramePhase.FixedUpdate, deltaTime);
+            ProcessPhase(FramePhase.FixedUpdate, deltaTime, unscaledDeltaTime);
         }
 
         public void Update(float deltaTime, float unscaledDeltaTime)
         {
-            ProcessPhase(FramePhase.Update, deltaTime);
+            ProcessPhase(FramePhase.Update, deltaTime, unscaledDeltaTime);
         }
 
         public void LateUpdate(float deltaTime, float unscaledDeltaTime)
         {
-            ProcessPhase(FramePhase.LateUpdate, deltaTime);
+            ProcessPhase(FramePhase.LateUpdate, deltaTime, unscaledDeltaTime);
         }
 
         public void EndOfFrame(float deltaTime, float unscaledDeltaTime)
         {
-            ProcessPhase(FramePhase.EndOfFrame, deltaTime);
+            ProcessPhase(FramePhase.EndOfFrame, deltaTime, unscaledDeltaTime);
         }
 
         // ============= 内部处理逻辑 =============
 
-        private void ProcessPhase(FramePhase phase, float deltaTime)
+        private void ProcessPhase(FramePhase phase, float deltaTime, float unscaledDeltaTime)
         {
             // 以 Phase 顺序判断帧边界：
             // - 完整帧循环中 Phase 单调递增，只在 EarlyUpdate 递增一次。
@@ -234,6 +255,7 @@ namespace TryGet.Async
             {
                 _frameCount++;
                 _elapsedTime += deltaTime;
+                _unscaledElapsedTime += unscaledDeltaTime;
             }
             _lastProcessedPhase = phase;
 
@@ -276,7 +298,8 @@ namespace TryGet.Async
             for (int i = delayQueue.Count - 1; i >= 0; i--)
             {
                 var e = delayQueue[i];
-                if (e.DueTime <= _elapsedTime)
+                float currentTime = e.TimeMode == TimeMode.Scaled ? _elapsedTime : _unscaledElapsedTime;
+                if (e.DueTime <= currentTime)
                 {
                     e.Tcs.SetResult();
                     TGTaskCompletionSource.Recycle(e.Tcs);

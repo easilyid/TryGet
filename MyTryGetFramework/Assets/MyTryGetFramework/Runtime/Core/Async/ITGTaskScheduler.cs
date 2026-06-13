@@ -4,6 +4,7 @@ namespace TryGet.Async
     /// 异步调度服务。把"下一帧 / 延迟 N 秒 / 等待 N 帧"转化为可 await 的 TGTask。
     ///
     /// V2.2+ 支持 Phase-aware 调度：可指定在哪个 FramePhase 恢复异步操作。
+    /// C3+ 支持 Scaled / Unscaled time：可指定延迟是否受 Time.timeScale 影响。
     ///
     /// 实现为 <see cref="IModule"/> + 5 个 Update 接口：注册到 <see cref="IModuleSystem"/> 后，
     /// 每帧由 host 驱动所有 Phase 的 Update 方法检查到期任务。
@@ -25,11 +26,27 @@ namespace TryGet.Async
         /// <summary>在指定 <paramref name="phase"/> 的下一次执行时完成的 TGTask。</summary>
         TGTask Yield(FramePhase phase);
 
-        /// <summary>累计经过 <paramref name="seconds"/> 秒后完成的 TGTask（默认在 Update 阶段）。</summary>
+        /// <summary>
+        /// 累计经过 <paramref name="seconds"/> 秒后完成的 TGTask（默认在 Update 阶段，Scaled time）。
+        /// </summary>
         TGTask Delay(float seconds);
 
-        /// <summary>在指定 <paramref name="phase"/> 累计经过 <paramref name="seconds"/> 秒后完成的 TGTask。</summary>
+        /// <summary>
+        /// 在指定 <paramref name="phase"/> 累计经过 <paramref name="seconds"/> 秒后完成的 TGTask（Scaled time）。
+        /// </summary>
         TGTask Delay(float seconds, FramePhase phase);
+
+        /// <summary>
+        /// C3：累计经过 <paramref name="seconds"/> 秒后完成的 TGTask（默认在 Update 阶段）。
+        /// <paramref name="timeMode"/> 指定是否受 Time.timeScale 影响。
+        /// </summary>
+        TGTask Delay(float seconds, TimeMode timeMode);
+
+        /// <summary>
+        /// C3：在指定 <paramref name="phase"/> 累计经过 <paramref name="seconds"/> 秒后完成的 TGTask。
+        /// <paramref name="timeMode"/> 指定是否受 Time.timeScale 影响。
+        /// </summary>
+        TGTask Delay(float seconds, FramePhase phase, TimeMode timeMode);
 
         /// <summary>经过 <paramref name="frameCount"/> 帧后完成的 TGTask（默认在 Update 阶段）。</summary>
         TGTask WaitForFrames(int frameCount);

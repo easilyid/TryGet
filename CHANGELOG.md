@@ -4,6 +4,41 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — C3 TGTaskScheduler Unscaled Time 支持
+
+> 2026/06/13。扩展 TGTaskScheduler 支持 Scaled / Unscaled time，Delay 可指定是否受 Time.timeScale 影响。
+
+### Added
+
+- **TimeMode 枚举**：`Scaled`（受 Time.timeScale 影响，对应 Unity Time.deltaTime）/ `Unscaled`（真实时间，不受 Time.timeScale 影响，对应 Unity Time.unscaledDeltaTime）。
+- **ITGTaskScheduler 新重载**：
+  - `Delay(float seconds, TimeMode timeMode)` — 指定时间模式的延迟（默认 Update phase）
+  - `Delay(float seconds, FramePhase phase, TimeMode timeMode)` — 同时指定 phase 和时间模式
+- **TGTaskScheduler 内部双时间轨**：维护 `_elapsedTime`（Scaled）和 `_unscaledElapsedTime`（Unscaled），每帧 `ProcessPhase` 同时累加两套时间。
+- **DelayedEntry 结构扩展**：增加 `TimeMode` 字段，`ProcessDelayQueue` 根据 `TimeMode` 选择对应时间轨判断到期。
+- **C3 测试覆盖**：`TGTaskSchedulerUnscaledTimeTests` 8 例（Scaled/Unscaled 独立计时、phase 组合、混合队列、默认行为）。
+
+### Changed
+
+- **旧 API 向后兼容**：`Delay(float)` / `Delay(float, FramePhase)` 默认 `TimeMode.Scaled`（与旧行为一致）。
+
+### Verification
+
+- Unity EditMode：397/397（+8 C3 测试）；Shadow csproj + Samples/Net 0 错误。
+
+### Design Notes
+
+- **C3 范围聚焦 Unscaled Time**：Phase-aware 调度（Yield/Delay/WaitForFrames 支持 FramePhase）已在 V2.2 完成，C3 仅补 unscaled time 支持。
+- **Repeating Timer + Catch-up 留给 C7**：plan 明确 C7（Timer Catch-up Policy）是独立候选，C3 不包含 repeating timer 抽象。
+- **双时间轨设计**：`_elapsedTime` / `_unscaledElapsedTime` 分别累加 `deltaTime` / `unscaledDeltaTime`，`DelayedEntry.TimeMode` 决定用哪条轨。所有 Phase 队列（`_delayQueuesByPhase`）共享双时间轨，无需为每个 Phase 单独维护。
+
+---
+
+## V2.0 — C5 Registry 诊断快照 + C12 退役裁决
+
+> 2026/06/13。C5 实现结构化 Snapshot + 双轨 API（向后兼容），C12 逐条验证后裁决退役（三规则全部冗余/无靶点）。
+
+
 ## V2.0 — C5 Registry 诊断快照（结构化可观察性）
 
 > 2026/06/13。C12 裁决退役后转做 C5——补 ModuleRegistry/EventHandlerRegistry 结构化 Snapshot + 双轨 API 向后兼容。
