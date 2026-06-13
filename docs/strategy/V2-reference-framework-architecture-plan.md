@@ -676,9 +676,11 @@ AlicizaX 核心是 `Runtime/ABase/Service/Core/` 的一套 **三层作用域 Ser
 
 ---
 
-### Candidate 4 — Procedure Transition Result
+### Candidate 4 — Procedure Transition Result ✅ **已完成（2026/06/13）**
 
 **来源参考**：TEngine FSM transition 封装，hsenl ProcedureLine 的流程结果思想。
+
+> 实施记录：`Start/Push/Pop/Replace` 签名 `void` → `TGTask`（向后兼容），返回可 await 的 transition；异步错误双通道（transition task 抛出 + LastAsyncError 兼容保留）；Replace 串联 exit→enter 两段异步。第三轮复查证实 TEngine/BigCat/hsenl 的流程切换全是同步 API，TryGet 借 TGTask 做出更 deep 的设计。Unity EditMode 378/378（新增 ProcedureTransitionTests 10 例）。详见 CHANGELOG「V2.0 — C4」段与 `.scratch/c4-procedure-transition/`。Stop 保持 void（范围收敛，见 issue）。
 
 **必要性**：
 
@@ -1027,11 +1029,12 @@ C1/C3/C7 已落地；6ter.3 自审发现 C2 已基本完成（仅剩收尾）。
 
 1. **P1 — C2 收尾（小）** ✅ **已完成（2026/06/13，同日实施）**：HandlerException 上报钩子 + MaxPublishDepth=32 递归护栏 + 关单，EditMode 368/368 验证。
 2. **P1 — C11 TGTask 池化生命周期收口（本轮主菜）** ✅ **已完成（2026/06/13，同日实施）**：消费侧统一归还 + 全路径 version 校验 + tcs 池化（设计调整见 Candidate 11 注记），调度器热路径稳态零分配。
-3. **P2 — C10 SourceGen 诊断** ✅ **已完成（2026/06/13）**：生成器源码工程化（专属 sln + 测试工程 + 构建脚本 + 文档）+ TG0001-TG0006 编译期诊断 + 修复命名漂移 bug。**C12（框架契约 Analyzer）可在此 Roslyn tooling 基建上续作 ← 下一个迭代起点**。
-4. **P2 — C4 Procedure Transition Result**、**C5 Registry 诊断**：顺位不变。
-5. **P3 — C9（已获 MyFramework ClassPool 蓝本强化）、C6**：等真实需求。
-6. **决策门 — C8**：不变，等 V2.3/V2.5。
-7. **观察项（不立候选）**：owner-scope 异步/定时器批量取消（MyFramework DelayCmdWatcher 思想）、Module 异步初始化段与 destroy 顺序解耦（V2.4 资源 Adapter 期再评估）、TGTaskScheduler 帧边界启发式误判（C11 实施时审视过，保持现状：真实 Unity 接入时由 ModuleSystem 显式通知帧首再修）。
+3. **P2 — C10 SourceGen 诊断** ✅ **已完成（2026/06/13）**：生成器源码工程化（专属 sln + 测试工程 + 构建脚本 + 文档）+ TG0001-TG0006 编译期诊断 + 修复命名漂移 bug。（生成器源码后续已迁入框架内 `Generators~/`，对标 Unity Netcode Source~。）
+4. **P2 — C4 Procedure Transition Result** ✅ **已完成（2026/06/13）**：Start/Push/Pop/Replace 返回可 await transition，消除 IsEntering/IsExiting/LastAsyncError 轮询；比参考框架（全是同步切换）更 deep。**C5 Registry 诊断**顺位不变。
+5. **P2 — C12 框架契约 Analyzer ← 下一个迭代起点**：在 C10 建好的 Roslyn tooling 基建上续作（对标 MyFramework AnalyzerUnity 的编译期契约执法）。
+6. **P3 — C9（已获 MyFramework ClassPool 蓝本强化）、C6**：等真实需求。
+7. **决策门 — C8**：不变，等 V2.3/V2.5。
+8. **观察项（不立候选）**：owner-scope 异步/定时器批量取消（MyFramework DelayCmdWatcher 思想）、Module 异步初始化段与 destroy 顺序解耦（V2.4 资源 Adapter 期再评估）、TGTaskScheduler 帧边界启发式误判（C11 实施时审视过，保持现状：真实 Unity 接入时由 ModuleSystem 显式通知帧首再修）。
 
 ---
 

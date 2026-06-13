@@ -4,6 +4,31 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — C4 Procedure Transition Result（可 await 流程切换）
+
+> 2026/06/13。消除 §7.4 点名的 shallow interface：ProcedureModule 此前暴露 `IsEntering`/`IsExiting`/`LastAsyncError`
+> 三个内部异步状态字段，调用者必须逐帧轮询才能知道异步切换是否完成/出错。参考框架复查证实 TEngine（FsmState
+> 同步 ChangeState）、BigCat（SceneMgr 同步 Add/Close）、hsenl（ProcedureLine 是 pipeline）**都把流程切换做成同步 API**、
+> 异步性靠状态内部自己 await——TryGet 借 TGTask（C11 池化收口）做出了比所有参考更 deep 的「可 await 切换」。
+
+### Changed
+
+- **`IProcedureModule.Start/Push/Pop/Replace` 签名 `void` → `TGTask`**（向后兼容：现有不接收返回值的调用照常编译，TGTask 是 struct 丢弃无副作用）。返回表示「本次切换完成」的 transition task：同步流程立即完成（`CompletedTask`），异步流程（`IAsyncProcedure`）在 OnEnterAsync/OnExitAsync 全链完成时完成，`Replace` 串联 exit→enter 两段异步、只在两者都完成后才完成。
+- **异步错误双通道**：既写入 `LastAsyncError`（保留兼容，旧测试/旧代码不破坏），又通过 transition task 抛出（`await module.Push(...)` 时 throw）。调用者可 `await` 切换、用 try/catch 处理错误，不再轮询。
+- pending 时再切换保持「拒绝」策略（`ThrowIfAsync`）；可 await 后正常用法是 await 上一个再切下一个，自然避免冲突。
+- `Stop` 保持 `void`（「立即清栈 + 后台跑异步 exit」的终结语义，不适合单一 transition）；`IsEntering`/`IsExiting`/`LastAsyncError` 保留兼容。
+
+### Fixed
+
+- Shadow csproj（`ServerProject/MyTryGetFramework.Core`）对 Source Generator 工程的 `ProjectReference` 路径修正为迁移后的 `Generators~/`（上一提交 `adc6420` 迁移遗漏，产生 MSB9008 警告）。
+
+### Verification
+
+- Unity EditMode：378/378 全绿（368 现有 + 10 个 `ProcedureTransitionTests`：同步立即完成、异步跟随完成、Pop resume 时序、Replace 两段串联、错误经 await 抛出且 LastAsyncError 兼容）。
+- Shadow csproj `dotnet build` 0 警告 0 错误（含生成器 analyzer 在 .NET 端验证）。
+
+---
+
 ## V2.0 — Source Generator 源码迁入框架包（Generators~）
 
 > 2026/06/13。把生成器源码工程从仓库根 `Tools/` 迁入框架包内 `MyTryGetFramework/Assets/MyTryGetFramework/Generators~/`，

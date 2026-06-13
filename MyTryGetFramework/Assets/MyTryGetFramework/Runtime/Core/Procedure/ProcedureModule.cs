@@ -68,15 +68,15 @@ namespace TryGet
             _procedures[id] = procedure;
         }
 
-        public void Start(string initial)
+        public TGTask Start(string initial)
         {
             if (_stack.Count > 0)
                 throw new InvalidOperationException(
                     $"ProcedureModule already started (current: '{CurrentProcedure}'). Call Stop first.");
-            EnterProcedure(initial);
+            return RunTransition(onDone => EnterProcedure(initial, onDone));
         }
 
-        public void Push(string target)
+        public TGTask Push(string target)
         {
             ThrowIfAsync();
             if (_stack.Count == 0)
@@ -84,26 +84,28 @@ namespace TryGet
 
             var currentProc = _procedures[_stack[_stack.Count - 1]];
             currentProc.OnPause(this);
-            EnterProcedure(target);
+            return RunTransition(onDone => EnterProcedure(target, onDone));
         }
 
-        public void Pop()
+        public TGTask Pop()
         {
             ThrowIfAsync();
             if (_stack.Count == 0)
                 throw new InvalidOperationException("ProcedureModule stack is empty.");
 
-            ExitTop(() =>
-            {
-                if (_stack.Count > 0)
+            return RunTransition(onDone =>
+                ExitTop(err =>
                 {
-                    var resumed = _procedures[_stack[_stack.Count - 1]];
-                    resumed.OnResume(this);
-                }
-            });
+                    if (err == null && _stack.Count > 0)
+                    {
+                        var resumed = _procedures[_stack[_stack.Count - 1]];
+                        resumed.OnResume(this);
+                    }
+                    onDone(err);
+                }));
         }
 
-        public void Replace(string target)
+        public TGTask Replace(string target)
         {
             ThrowIfAsync();
             if (_stack.Count == 0)
@@ -111,7 +113,13 @@ namespace TryGet
             if (!_procedures.ContainsKey(target))
                 throw new InvalidOperationException($"Procedure '{target}' not registered.");
 
-            ExitTop(() => EnterProcedure(target));
+            return RunTransition(onDone =>
+                ExitTop(exitErr =>
+                {
+                    // exit 失败：不进入替换流程，错误直接结束本次切换
+                    if (exitErr != null) { onDone(exitErr); return; }
+                    EnterProcedure(target, onDone);
+                }));
         }
 
         public void Stop()
@@ -187,7 +195,46 @@ namespace TryGet
             }
         }
 
-        private void EnterProcedure(string id)
+        /// <summary>
+        /// C4：把一次「可能含异步 enter/exit」的切换包装成可 await 的 TGTask。
+        /// 同步全程走完 → 立即完成（CompletedTask / FromException）；异步未完成 → 返回延迟完成的 tcs.Task。
+        /// onComplete(error) 由切换链在其真正完成点（同步立即 / 异步 OnCompleted / 错误）调用一次。
+        /// </summary>
+        private TGTask RunTransition(Action<Action<Exception>> start)
+        {
+            bool syncDone = false;
+            Exception syncError = null;
+            TGTaskCompletionSource tcs = null;
+
+            void OnComplete(Exception error)
+            {
+                if (tcs == null)
+                {
+                    // 切换在 start() 内同步完成
+                    syncDone = true;
+                    syncError = error;
+                }
+                else if (error != null)
+                {
+                    tcs.SetException(error);
+                }
+                else
+                {
+                    tcs.SetResult();
+                }
+            }
+
+            start(OnComplete);
+
+            if (syncDone)
+                return syncError != null ? TGTask.FromException(syncError) : TGTask.CompletedTask;
+
+            // 异步未完成：建立 tcs，OnComplete 将在未来帧完成它
+            tcs = new TGTaskCompletionSource();
+            return tcs.Task;
+        }
+
+        private void EnterProcedure(string id, Action<Exception> onComplete)
         {
             if (!_procedures.TryGetValue(id, out var proc))
                 throw new InvalidOperationException($"Procedure '{id}' not registered.");
@@ -197,27 +244,29 @@ namespace TryGet
             proc.OnEnter(this);
 
             if (proc is IAsyncProcedure asyncProc)
-                BeginAsyncEnter(asyncProc);
+                BeginAsyncEnter(asyncProc, onComplete);
+            else
+                onComplete(null);
         }
 
-        private void ExitTop(Action afterExit)
+        private void ExitTop(Action<Exception> onComplete)
         {
             var id = _stack[_stack.Count - 1];
             var proc = _procedures[id];
 
             if (proc is IAsyncProcedure asyncProc)
             {
-                BeginSyncExit(id, asyncProc, afterExit);
+                BeginSyncExit(id, asyncProc, onComplete);
             }
             else
             {
                 RemoveTop(id);
                 proc.OnExit(this);
-                afterExit?.Invoke();
+                onComplete(null);
             }
         }
 
-        private void BeginSyncExit(string id, IAsyncProcedure asyncProc, Action afterExit)
+        private void BeginSyncExit(string id, IAsyncProcedure asyncProc, Action<Exception> onComplete)
         {
             int version = ++_exitVersion;
             _isExiting = true;
@@ -229,18 +278,19 @@ namespace TryGet
                 RemoveTop(id);
                 _isExiting = false;
                 try { asyncProc.OnExit(this); } catch { }
-                afterExit?.Invoke();
+                onComplete(ex);
                 return;
             }
 
             if (task.IsCompleted)
             {
+                Exception err = null;
                 try { task.GetAwaiter().GetResult(); }
-                catch (Exception ex) { _lastAsyncError = ex; }
+                catch (Exception ex) { _lastAsyncError = ex; err = ex; }
                 RemoveTop(id);
                 try { asyncProc.OnExit(this); } catch { }
                 _isExiting = false;
-                afterExit?.Invoke();
+                onComplete(err);
                 return;
             }
 
@@ -248,14 +298,15 @@ namespace TryGet
             {
                 bool isCurrentExit = version == _exitVersion;
 
+                Exception err = null;
                 try { task.GetAwaiter().GetResult(); }
-                catch (Exception ex) { _lastAsyncError = ex; }
+                catch (Exception ex) { _lastAsyncError = ex; err = ex; }
                 if (isCurrentExit)
                     RemoveTop(id);
                 try { asyncProc.OnExit(this); } catch { }
                 _isExiting = false;
                 if (isCurrentExit)
-                    afterExit?.Invoke();
+                    onComplete(err);
             });
         }
 
@@ -266,7 +317,7 @@ namespace TryGet
                 _stack.RemoveAt(index);
         }
 
-        private void BeginAsyncEnter(IAsyncProcedure asyncProc)
+        private void BeginAsyncEnter(IAsyncProcedure asyncProc, Action<Exception> onComplete)
         {
             _isEntering = true;
             TGTask task;
@@ -275,22 +326,27 @@ namespace TryGet
             {
                 _lastAsyncError = ex;
                 _isEntering = false;
+                onComplete(ex);
                 return;
             }
 
             if (task.IsCompleted)
             {
+                Exception err = null;
                 try { task.GetAwaiter().GetResult(); }
-                catch (Exception ex) { _lastAsyncError = ex; }
+                catch (Exception ex) { _lastAsyncError = ex; err = ex; }
                 _isEntering = false;
+                onComplete(err);
                 return;
             }
 
             task.GetAwaiter().OnCompleted(() =>
             {
+                Exception err = null;
                 try { task.GetAwaiter().GetResult(); }
-                catch (Exception ex) { _lastAsyncError = ex; }
+                catch (Exception ex) { _lastAsyncError = ex; err = ex; }
                 _isEntering = false;
+                onComplete(err);
             });
         }
 
