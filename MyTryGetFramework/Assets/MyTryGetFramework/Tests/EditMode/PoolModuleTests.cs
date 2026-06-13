@@ -121,8 +121,11 @@ namespace TryGet.Tests
             var p = new PoolModule();
             var pool = p.GetOrCreatePool(() => new Dummy());
 
-            pool.Return(new Dummy());
-            pool.Return(new Dummy());
+            // C9：先 Rent 再 Return（DEBUG 模式下会检测对象来源）
+            var d1 = pool.Rent();
+            var d2 = pool.Rent();
+            pool.Return(d1);
+            pool.Return(d2);
 
             Assert.AreEqual(2, pool.IdleCount);
         }
@@ -135,7 +138,9 @@ namespace TryGet.Tests
             var pool = p.GetOrCreatePool(() => new Dummy(),
                 onReturn: d => { resets++; d.Tag = 0; });
 
-            var d = new Dummy { Tag = 42 };
+            // C9：先 Rent 再 Return
+            var d = pool.Rent();
+            d.Tag = 42;
             pool.Return(d);
 
             Assert.AreEqual(1, resets);
@@ -230,7 +235,18 @@ namespace TryGet.Tests
         [Test]
         public void DoubleReturn_SameInstance_IsDocumentedUndefinedBehavior()
         {
-            // V0.2 不强制检测，但记录行为：IdleCount 会被错误地增加 2，
+#if UNITY_ASSERTIONS || DEBUG
+            // C9 DEBUG/UNITY_ASSERTIONS 模式：重复 Return 被检测并抛异常
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+            var d = pool.Rent(); // C9：必须先 Rent
+            d.Tag = 1;
+
+            pool.Return(d);
+            Assert.Throws<InvalidOperationException>(() => pool.Return(d),
+                "C9: 重复 Return 应抛 InvalidOperationException");
+#else
+            // Release 模式：V0.2 不强制检测，但记录行为：IdleCount 会被错误地增加 2，
             // 之后 Rent 两次会得到同一引用。调用方负责避免重复 Return（见 IObjectPool.Return XML 注释）。
             var p = new PoolModule();
             var pool = p.GetOrCreatePool(() => new Dummy());
@@ -243,18 +259,28 @@ namespace TryGet.Tests
             var first = pool.Rent();
             var second = pool.Rent();
             Assert.AreSame(first, second, "未定义行为：两次 Rent 给出同一实例");
+#endif
         }
 
         [Test]
         public void ReturnObjectNotFromRent_IsAccepted_NoCrash()
         {
-            // 池不验证来源（V0.2 简化），手动 new 的对象 Return 进去也接受。
+#if UNITY_ASSERTIONS || DEBUG
+            // C9 DEBUG/UNITY_ASSERTIONS 模式：Return 未 Rent 的对象被检测并抛异常
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy());
+
+            Assert.Throws<InvalidOperationException>(() => pool.Return(new Dummy()),
+                "C9: Return 未 Rent 的对象应抛 InvalidOperationException");
+#else
+            // Release 模式：池不验证来源（V0.2 简化），手动 new 的对象 Return 进去也接受。
             var p = new PoolModule();
             var pool = p.GetOrCreatePool(() => new Dummy());
 
             pool.Return(new Dummy());
 
             Assert.AreEqual(1, pool.IdleCount);
+#endif
         }
     }
 }

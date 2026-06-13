@@ -4,6 +4,33 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.0 — C9 Pool 诊断快照 + 重复释放检测
+
+> 2026/06/13。补全 IObjectPool 诊断可观察性（计数器 + 峰值 + 命中率）+ DEBUG/UNITY_ASSERTIONS 模式下 HashSet 检测重复 Return。
+
+### Added
+
+- **PoolDiagnostics 结构**：只读诊断快照（TotalRented/TotalReturned/CurrentActive/IdleCount/PeakActive/HitCount/MissCount），用于分析池命中率、泄漏、峰值容量。
+- **IObjectPool.GetDiagnostics()**：返回 `PoolDiagnostics` 快照（替代旧的仅 `IdleCount` 属性）。
+- **重复 Return 检测**（DEBUG/UNITY_ASSERTIONS 模式）：PoolModule.ObjectPool 内部维护 `HashSet<T> _activeSet`，Rent 时 Add、Return 时 Remove。重复 Return 或 Return 未 Rent 对象抛 `InvalidOperationException`（Release 模式下保持旧行为"未定义"）。
+- **C9 测试覆盖**：PoolDiagnosticsTests 7 例（初始状态/Rent/Return 计数器/Hit-Miss 区分/峰值跟踪/预热计数/多周期累积）。
+
+### Changed
+
+- **PoolModuleTests 旧测试适配**：`DoubleReturn_SameInstance_IsDocumentedUndefinedBehavior` / `ReturnObjectNotFromRent_IsAccepted_NoCrash` / `Return_IncrementsIdleCount` / `Return_InvokesOnReturnHook` 适配 C9 DEBUG 检测（用 `#if UNITY_ASSERTIONS || DEBUG` 分支，DEBUG 模式下期望抛异常，Release 模式下保持旧行为）。
+
+### Verification
+
+- Unity EditMode：404/404（+7 C9 测试）；Shadow csproj + Samples/Net 0 错误。
+
+### Design Notes
+
+- **计数器设计**：TotalRented/TotalReturned 单调递增（可用于计算总命中率）；CurrentActive = TotalRented - TotalReturned（运行时活跃数）；PeakActive 跟踪历史峰值；HitCount/MissCount 区分从 idle 取出 vs factory 新建（用于判断预热是否足够）。
+- **重复 Return 检测策略**：用 HashSet 而非 plan 提及的 generation-token（plan 说 AlicizaX generation-token 更规范，但先用简单方案；generation-token 需要对象实现 IPoolable 接口存 token 字段，侵入性更强）。DEBUG/UNITY_ASSERTIONS 模式下开启（对应 Unity Editor/Debug 构建），Release 模式下零开销（无 HashSet、无检测）。
+- **IObjectPool.IdleCount 保留**：向后兼容，等价 `GetDiagnostics().IdleCount`。
+
+---
+
 ## V2.0 — C3 TGTaskScheduler Unscaled Time 支持
 
 > 2026/06/13。扩展 TGTaskScheduler 支持 Scaled / Unscaled time，Delay 可指定是否受 Time.timeScale 影响。

@@ -47,6 +47,18 @@ namespace TryGet
             private readonly Func<T> _factory;
             private readonly Action<T> _onReturn;
 
+            // C9：诊断计数器
+            private long _totalRented;
+            private long _totalReturned;
+            private int _peakActive;
+            private long _hitCount;
+            private long _missCount;
+
+#if UNITY_ASSERTIONS || DEBUG
+            // C9：DEBUG 或 UNITY_ASSERTIONS 模式下检测重复 Return
+            private readonly HashSet<T> _activeSet = new HashSet<T>();
+#endif
+
             public ObjectPool(Func<T> factory, Action<T> onReturn, int initialSize)
             {
                 _factory = factory;
@@ -61,14 +73,59 @@ namespace TryGet
 
             public T Rent()
             {
-                return _idle.Count > 0 ? _idle.Pop() : _factory();
+                T item;
+                if (_idle.Count > 0)
+                {
+                    item = _idle.Pop();
+                    _hitCount++;
+                }
+                else
+                {
+                    item = _factory();
+                    _missCount++;
+                }
+
+                _totalRented++;
+                int currentActive = (int)(_totalRented - _totalReturned);
+                if (currentActive > _peakActive)
+                    _peakActive = currentActive;
+
+#if UNITY_ASSERTIONS || DEBUG
+                _activeSet.Add(item);
+#endif
+
+                return item;
             }
 
             public void Return(T item)
             {
                 if (item == null) return;
+
+#if UNITY_ASSERTIONS || DEBUG
+                // C9：DEBUG 或 UNITY_ASSERTIONS 模式下检测重复 Return
+                if (!_activeSet.Remove(item))
+                    throw new InvalidOperationException(
+                        $"Attempted to return an object of type {typeof(T).Name} that was not rented from this pool, or was already returned. " +
+                        "This indicates a double-release bug.");
+#endif
+
                 _onReturn?.Invoke(item);
                 _idle.Push(item);
+                _totalReturned++;
+            }
+
+            public PoolDiagnostics GetDiagnostics()
+            {
+                int currentActive = (int)(_totalRented - _totalReturned);
+                return new PoolDiagnostics(
+                    _totalRented,
+                    _totalReturned,
+                    currentActive,
+                    _idle.Count,
+                    _peakActive,
+                    _hitCount,
+                    _missCount
+                );
             }
         }
     }
