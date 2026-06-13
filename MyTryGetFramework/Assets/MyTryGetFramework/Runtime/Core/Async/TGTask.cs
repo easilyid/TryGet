@@ -47,10 +47,19 @@ namespace TryGet.Async
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Awaiter GetAwaiter() => new Awaiter(this);
 
+        /// <summary>
+        /// 任务是否已完成。body 已被消费归还（version 不匹配）的过期句柄视为已完成；
+        /// 对过期句柄继续 GetResult 会抛 <see cref="TGTaskExpiredException"/>。
+        /// </summary>
         public bool IsCompleted
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Body?.IsCompleted ?? true;
+            get
+            {
+                if (Body == null) return true;
+                if (Version != Body.Version) return true; // 过期 = 已被消费 = 已完成
+                return Body.IsCompleted;
+            }
         }
 
         /// <summary>
@@ -69,20 +78,19 @@ namespace TryGet.Async
                 // 已完成路径：手动 GetResult 检查异常（GetResult 自身吞 result，但会 rethrow exception）
                 try { Body.GetResult(); }
                 catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
-                if (TaskType == TGTaskType.Builder && Body is TGTaskBody tb)
+                if (Body is TGTaskBody tb)
                     TGTaskPool.Return(tb);
             }
             else
             {
                 var capturedBody = Body;
                 var capturedVersion = Version;
-                var capturedType = TaskType;
                 Body.OnCompleted(() =>
                 {
                     if (capturedVersion != capturedBody.Version) return;
                     try { capturedBody.GetResult(); }
                     catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
-                    if (capturedType == TGTaskType.Builder && capturedBody is TGTaskBody tb2)
+                    if (capturedBody is TGTaskBody tb2)
                         TGTaskPool.Return(tb2);
                 });
             }
@@ -120,7 +128,12 @@ namespace TryGet.Async
             public bool IsCompleted
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                get => _task.Body?.IsCompleted ?? true;
+                get
+                {
+                    if (_task.Body == null) return true;
+                    if (_task.Version != _task.Body.Version) return true; // 过期 = 已消费
+                    return _task.Body.IsCompleted;
+                }
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -137,9 +150,9 @@ namespace TryGet.Async
                 }
                 finally
                 {
-                    // V0.6 Iter 4：Builder 类型自动归还 body 到 Pool。
-                    // Manual 类型由 TGTaskCompletionSource.Return 显式归还。
-                    if (_task.TaskType == TGTaskType.Builder && body is TGTaskBody tb)
+                    // V2.0 C11：消费侧统一归还 —— Builder 与 Manual body 均在此处回池。
+                    // 双重归还由进入 try 前的 version 检查防护（第二个 struct 副本直接抛 Expired）。
+                    if (body is TGTaskBody tb)
                         TGTaskPool.Return(tb);
                 }
             }
@@ -185,10 +198,16 @@ namespace TryGet.Async
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Awaiter GetAwaiter() => new Awaiter(this);
 
+        /// <summary>语义同 <see cref="TGTask.IsCompleted"/>：过期句柄视为已完成。</summary>
         public bool IsCompleted
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Body?.IsCompleted ?? true;
+            get
+            {
+                if (Body == null) return true;
+                if (Version != Body.Version) return true; // 过期 = 已被消费 = 已完成
+                return Body.IsCompleted;
+            }
         }
 
         /// <summary>对标 <see cref="TGTask.Forget"/>。</summary>
@@ -201,20 +220,19 @@ namespace TryGet.Async
             {
                 try { Body.GetResult(); }
                 catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
-                if (TaskType == TGTaskType.Builder && Body is TGTaskBody<T> tb)
+                if (Body is TGTaskBody<T> tb)
                     TGTaskPool.Return(tb);
             }
             else
             {
                 var capturedBody = Body;
                 var capturedVersion = Version;
-                var capturedType = TaskType;
                 Body.OnCompleted(() =>
                 {
                     if (capturedVersion != capturedBody.Version) return;
                     try { capturedBody.GetResult(); }
                     catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
-                    if (capturedType == TGTaskType.Builder && capturedBody is TGTaskBody<T> tb2)
+                    if (capturedBody is TGTaskBody<T> tb2)
                         TGTaskPool.Return(tb2);
                 });
             }
@@ -253,7 +271,12 @@ namespace TryGet.Async
             public bool IsCompleted
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                get => _task.Body?.IsCompleted ?? true;
+                get
+                {
+                    if (_task.Body == null) return true;
+                    if (_task.Version != _task.Body.Version) return true; // 过期 = 已消费
+                    return _task.Body.IsCompleted;
+                }
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -270,7 +293,8 @@ namespace TryGet.Async
                 }
                 finally
                 {
-                    if (_task.TaskType == TGTaskType.Builder && body is TGTaskBody<T> tb)
+                    // V2.0 C11：消费侧统一归还（Builder 与 Manual），version 检查防双重归还
+                    if (body is TGTaskBody<T> tb)
                         TGTaskPool.Return(tb);
                 }
             }

@@ -14,19 +14,22 @@ namespace TryGet
         /// <summary>
         /// 把延迟 N 秒后触发的回调包装成可 await 的 TGTask（使用 scaled deltaTime）。
         ///
-        /// 实现：内部用 <see cref="TGTaskCompletionSource"/>，timer 触发时 SetResult。
-        /// body 生命周期由 await 路径的 GetResult 自动管理，Manual 类型不归还池（由 GC 回收）。
-        ///
-        /// 注意：调用本方法即占用一个 TGTaskBody（自动池化）；不要在 hot loop 反复构造但不 await。
+        /// 实现：内部用池化的 <see cref="TGTaskCompletionSource"/>，timer 触发时 SetResult 并回收 tcs；
+        /// body 由 await 路径的 GetResult 在消费侧自动归还池（V2.0 C11）。
         /// </summary>
         public static TGTask WaitAsync(this ITimerModule timer, float seconds)
         {
             if (timer == null) throw new ArgumentNullException(nameof(timer));
             if (seconds < 0) throw new ArgumentOutOfRangeException(nameof(seconds), "seconds must be >= 0");
 
-            var tcs = new TGTaskCompletionSource();
-            timer.Schedule(seconds, () => tcs.SetResult());
-            return tcs.Task;
+            var tcs = TGTaskCompletionSource.Rent();
+            var task = tcs.Task;
+            timer.Schedule(seconds, () =>
+            {
+                tcs.SetResult();
+                TGTaskCompletionSource.Recycle(tcs);
+            });
+            return task;
         }
 
         /// <summary>
@@ -37,9 +40,14 @@ namespace TryGet
             if (timer == null) throw new ArgumentNullException(nameof(timer));
             if (seconds < 0) throw new ArgumentOutOfRangeException(nameof(seconds), "seconds must be >= 0");
 
-            var tcs = new TGTaskCompletionSource();
-            timer.ScheduleUnscaled(seconds, () => tcs.SetResult());
-            return tcs.Task;
+            var tcs = TGTaskCompletionSource.Rent();
+            var task = tcs.Task;
+            timer.ScheduleUnscaled(seconds, () =>
+            {
+                tcs.SetResult();
+                TGTaskCompletionSource.Recycle(tcs);
+            });
+            return task;
         }
     }
 }

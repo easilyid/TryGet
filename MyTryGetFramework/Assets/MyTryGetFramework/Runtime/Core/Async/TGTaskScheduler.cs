@@ -111,21 +111,21 @@ namespace TryGet.Async
             // 取消所有未完成的 tcs（避免 await 永远 hang）
             foreach (var queues in _yieldQueuesByPhase.Values)
             {
-                foreach (var tcs in queues.ThisFrame) tcs.SetCanceled();
-                foreach (var tcs in queues.NextFrame) tcs.SetCanceled();
+                foreach (var tcs in queues.ThisFrame) { tcs.SetCanceled(); TGTaskCompletionSource.Recycle(tcs); }
+                foreach (var tcs in queues.NextFrame) { tcs.SetCanceled(); TGTaskCompletionSource.Recycle(tcs); }
                 queues.ThisFrame.Clear();
                 queues.NextFrame.Clear();
             }
 
             foreach (var delayQueue in _delayQueuesByPhase.Values)
             {
-                foreach (var e in delayQueue) e.Tcs.SetCanceled();
+                foreach (var e in delayQueue) { e.Tcs.SetCanceled(); TGTaskCompletionSource.Recycle(e.Tcs); }
                 delayQueue.Clear();
             }
 
             foreach (var frameQueue in _frameWaitQueuesByPhase.Values)
             {
-                foreach (var e in frameQueue) e.Tcs.SetCanceled();
+                foreach (var e in frameQueue) { e.Tcs.SetCanceled(); TGTaskCompletionSource.Recycle(e.Tcs); }
                 frameQueue.Clear();
             }
 
@@ -143,10 +143,10 @@ namespace TryGet.Async
 
         public TGTask Yield(FramePhase phase)
         {
-            var tcs = new TGTaskCompletionSource();
-            var queues = _yieldQueuesByPhase[phase];
-            queues.NextFrame.Add(tcs);
-            return tcs.Task;
+            var tcs = TGTaskCompletionSource.Rent();
+            var task = tcs.Task;
+            _yieldQueuesByPhase[phase].NextFrame.Add(tcs);
+            return task;
         }
 
         public TGTask Delay(float seconds)
@@ -157,7 +157,8 @@ namespace TryGet.Async
         public TGTask Delay(float seconds, FramePhase phase)
         {
             if (seconds < 0) throw new ArgumentOutOfRangeException(nameof(seconds), "Delay seconds must be >= 0");
-            var tcs = new TGTaskCompletionSource();
+            var tcs = TGTaskCompletionSource.Rent();
+            var task = tcs.Task;
             if (seconds == 0)
             {
                 _yieldQueuesByPhase[phase].NextFrame.Add(tcs);
@@ -166,7 +167,7 @@ namespace TryGet.Async
             {
                 _delayQueuesByPhase[phase].Add(new DelayedEntry(tcs, _elapsedTime + seconds));
             }
-            return tcs.Task;
+            return task;
         }
 
         public TGTask WaitForFrames(int frameCount)
@@ -177,16 +178,16 @@ namespace TryGet.Async
         public TGTask WaitForFrames(int frameCount, FramePhase phase)
         {
             if (frameCount < 0) throw new ArgumentOutOfRangeException(nameof(frameCount), "frameCount must be >= 0");
-            var tcs = new TGTaskCompletionSource();
             if (frameCount == 0)
             {
-                tcs.SetResult();
+                // 0 帧 = 立即完成，无须排队，零分配
+                return TGTask.CompletedTask;
             }
-            else
-            {
-                _frameWaitQueuesByPhase[phase].Add(new FrameEntry(tcs, _frameCount + frameCount));
-            }
-            return tcs.Task;
+
+            var tcs = TGTaskCompletionSource.Rent();
+            var task = tcs.Task;
+            _frameWaitQueuesByPhase[phase].Add(new FrameEntry(tcs, _frameCount + frameCount));
+            return task;
         }
 
         public TGTask DelayUntilPhase(FramePhase phase)
@@ -261,9 +262,9 @@ namespace TryGet.Async
             {
                 var tcs = queues.ThisFrame[i];
                 tcs.SetResult();
-                // 注意：不能立即 Return，因为外部持有的 TGTask 还在引用这个 body
-                // Return 会调用 body.Reset()，导致 _completed 变回 false
-                // 应该由任务的持有者在使用完后 Return，或者不 Return（由 GC 回收）
+                // body 由 await 消费侧（Awaiter.GetResult）自动回池；
+                // tcs 对象本身在此处立即回收复用（task 句柄在排队时已发出）
+                TGTaskCompletionSource.Recycle(tcs);
             }
             queues.ThisFrame.Clear();
         }
@@ -278,7 +279,7 @@ namespace TryGet.Async
                 if (e.DueTime <= _elapsedTime)
                 {
                     e.Tcs.SetResult();
-                    // 不立即 Return，原因同 ProcessYieldQueue
+                    TGTaskCompletionSource.Recycle(e.Tcs);
                     delayQueue.RemoveAt(i);
                 }
             }
@@ -294,7 +295,7 @@ namespace TryGet.Async
                 if (e.DueFrame <= _frameCount)
                 {
                     e.Tcs.SetResult();
-                    // 不立即 Return，原因同 ProcessYieldQueue
+                    TGTaskCompletionSource.Recycle(e.Tcs);
                     frameQueue.RemoveAt(i);
                 }
             }

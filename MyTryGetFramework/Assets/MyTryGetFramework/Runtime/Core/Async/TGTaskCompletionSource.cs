@@ -17,14 +17,61 @@ namespace TryGet.Async
     /// - 内部持 <see cref="TGTaskBody"/>（class，从 Pool Rent）+ <see cref="_version"/> 快照。
     /// - <see cref="Task"/> 返回 Manual 类型的 <see cref="TGTask"/>，与 builder 创建的区分开。
     /// - <see cref="SetResult"/> / <see cref="SetException"/> / <see cref="SetCanceled"/> 仅能调用一次（二次调用静默忽略，对齐 .NET TrySet 语义）。
-    /// - <see cref="Return"/> 显式归还 body 到 Pool；不调也不漏（body 由 GC 回收）。
+    /// - V2.0 C11：body 由 await 路径的 <c>Awaiter.GetResult</c> 在消费侧自动归还；
+    ///   <see cref="Return"/> 仅在「任务从未被 await」时手动归还有效（带 version 守卫防双重归还）。
+    /// - 框架内部热路径（TGTaskScheduler / TimerModuleAsyncExtensions）通过 <see cref="Rent"/> /
+    ///   <see cref="Recycle"/> 复用 tcs 对象本身，消除每次调度的堆分配。
     /// </summary>
     public sealed class TGTaskCompletionSource
     {
+        /// <summary>tcs 对象池最大容量，超出直接 GC。</summary>
+        internal const int MaxSourcePoolSize = 64;
+
+        private static readonly System.Collections.Generic.Stack<TGTaskCompletionSource> _sourcePool =
+            new System.Collections.Generic.Stack<TGTaskCompletionSource>();
+
         private TGTaskBody _body;
-        private readonly int _version;
+        private int _version;
 
         public TGTaskCompletionSource()
+        {
+            Arm();
+        }
+
+        /// <summary>从池中取一个就绪的 tcs（body 已 Rent）。框架内部热路径用；业务可直接 new。</summary>
+        internal static TGTaskCompletionSource Rent()
+        {
+            if (_sourcePool.Count > 0)
+            {
+                var tcs = _sourcePool.Pop();
+                tcs.Arm();
+                return tcs;
+            }
+            return new TGTaskCompletionSource();
+        }
+
+        /// <summary>
+        /// 把 tcs 对象本身归还池（不归还 body —— body 由消费侧 await 路径回池）。
+        /// 仅在完成（SetResult/SetException/SetCanceled）之后调用；调用后此 tcs 不可再使用。
+        /// </summary>
+        internal static void Recycle(TGTaskCompletionSource tcs)
+        {
+            if (tcs == null || tcs._body == null) return;
+            tcs._body = null;
+            if (_sourcePool.Count >= MaxSourcePoolSize) return;
+            _sourcePool.Push(tcs);
+        }
+
+        /// <summary>池中缓存的 tcs 对象数（诊断/测试用）。</summary>
+        internal static int PooledSourceCount => _sourcePool.Count;
+
+        /// <summary>清空 tcs 池（测试用）。</summary>
+        internal static void ClearSourcePool()
+        {
+            _sourcePool.Clear();
+        }
+
+        private void Arm()
         {
             _body = TGTaskPool.Rent();
             _version = _body.Version;
@@ -55,13 +102,14 @@ namespace TryGet.Async
         }
 
         /// <summary>
-        /// 把 body 归还到 Pool。完成后调用，让 body 可被复用。
-        /// 不调用也不漏（body 会被 GC），仅影响性能。调用后此 tcs 不可再使用。
+        /// 手动把 body 归还到 Pool（仅当任务从未被 await 消费时需要；带 version 守卫，
+        /// body 已被消费侧归还时本调用为 no-op）。调用后此 tcs 不可再使用。
         /// </summary>
         public void Return()
         {
             if (_body == null) return;
-            TGTaskPool.Return(_body);
+            if (_version == _body.Version)
+                TGTaskPool.Return(_body);
             _body = null;
         }
 
@@ -75,7 +123,8 @@ namespace TryGet.Async
     }
 
     /// <summary>
-    /// 带返回值的版本。
+    /// 带返回值的版本。body 同样由消费侧 await 路径自动归还；<see cref="Return"/> 带 version 守卫。
+    /// （泛型版暂不做 tcs 对象池化——框架内部热路径仅使用非泛型版。）
     /// </summary>
     public sealed class TGTaskCompletionSource<T>
     {
@@ -109,10 +158,15 @@ namespace TryGet.Async
             _body.SetException(new OperationCanceledException());
         }
 
+        /// <summary>
+        /// 手动把 body 归还到 Pool（仅当任务从未被 await 消费时需要；带 version 守卫，
+        /// body 已被消费侧归还时本调用为 no-op）。调用后此 tcs 不可再使用。
+        /// </summary>
         public void Return()
         {
             if (_body == null) return;
-            TGTaskPool.Return(_body);
+            if (_version == _body.Version)
+                TGTaskPool.Return(_body);
             _body = null;
         }
 

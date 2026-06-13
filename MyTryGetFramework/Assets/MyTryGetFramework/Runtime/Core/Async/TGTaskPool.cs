@@ -11,8 +11,9 @@ namespace TryGet.Async
     /// - Pool 满时不再池化（直接 GC），防止内存膨胀。
     /// - Rent / Return internal，仅由 builder / tcs 调用；公开诊断 API <see cref="PooledCount"/> / <see cref="PooledCountOf{T}"/>。
     ///
-    /// 用户使用模式：通常不直接接触 TGTaskPool。Builder 创建的 body 在 await 完成时自动归还；
-    /// Manual（tcs 创建）body 需用户调 <see cref="TGTaskCompletionSource.Return"/>。
+    /// 用户使用模式：通常不直接接触 TGTaskPool。V2.0 C11 起 Builder 与 Manual body 都在
+    /// await 消费路径（<c>Awaiter.GetResult</c> / <c>Forget</c>）自动归还；
+    /// 仅「创建后从未 await」的任务需要 <see cref="TGTaskCompletionSource.Return"/> 手动归还（不调则由 GC 兜底）。
     /// </summary>
     public static class TGTaskPool
     {
