@@ -11,6 +11,10 @@ namespace TryGet.Async
     /// - 实现所有 5 个 Update 接口，每个 Phase 处理对应队列
     /// - 支持跨 Phase 调度（如在 EarlyUpdate 中 Yield(LateUpdate)）
     ///
+    /// 取消（ADR-0021）：Yield/Delay/WaitForFrames 提供 <see cref="TGCancelToken"/> 重载。取消时绑定的
+    /// pending TGTask 以 <see cref="OperationCanceledException"/> 完成；entry 的清理与 registration 注销由
+    /// 各 ProcessXxxQueue 统一处理（见 <see cref="RegisterCancel"/> 的说明）。
+    ///
     /// 命名特别说明：类名 <c>TGTaskScheduler</c> 与 <see cref="System.Threading.Tasks.TaskScheduler"/> 区分开。
     /// 同时承担"全局 UnobservedException 钩子持有者"角色（对标 UniTaskScheduler.UnobservedTaskException）。
     /// </summary>
@@ -27,7 +31,7 @@ namespace TryGet.Async
         // 用于基于 Phase 顺序判断帧边界。
         // 规则：
         // - Early -> Fixed -> Update -> Late -> End 的完整单调序列里，只在第一个被调用的 Phase 里递增一次；
-        // - 同一 Phase 连续重复调用（例如测试直接多次调用 Update）视为进入新帧；
+        // - 同一 Phase 连续重复调用（例如测试直接多次调用 Update）视为每次进入新帧；
         // - Phase 顺序回退或回到更早的 Phase（例如 EndOfFrame 后再次 Update）也视为进入新帧。
         // 这样可以兼容完整帧、部分帧和重复 Update 调用，同时保持实现最小化。
         private FramePhase _lastProcessedPhase = FramePhase.EndOfFrame;
@@ -63,10 +67,22 @@ namespace TryGet.Async
 
         // ============= 内部数据结构 =============
 
+        // 每个排队项携带 tcs + 取消 registration（完成时 Dispose 注销，避免 owner-scope 累积注册，ADR-0021 D7）。
+        private readonly struct YieldItem
+        {
+            public readonly TGTaskCompletionSource Tcs;
+            public readonly TGCancelRegistration Reg;
+            public YieldItem(TGTaskCompletionSource tcs, TGCancelRegistration reg)
+            {
+                Tcs = tcs;
+                Reg = reg;
+            }
+        }
+
         private class YieldQueues
         {
-            public List<TGTaskCompletionSource> ThisFrame = new List<TGTaskCompletionSource>();
-            public List<TGTaskCompletionSource> NextFrame = new List<TGTaskCompletionSource>();
+            public List<YieldItem> ThisFrame = new List<YieldItem>();
+            public List<YieldItem> NextFrame = new List<YieldItem>();
         }
 
         private readonly struct DelayedEntry
@@ -74,11 +90,13 @@ namespace TryGet.Async
             public readonly TGTaskCompletionSource Tcs;
             public readonly float DueTime;
             public readonly TimeMode TimeMode; // C3：区分 Scaled / Unscaled
-            public DelayedEntry(TGTaskCompletionSource tcs, float dueTime, TimeMode timeMode)
+            public readonly TGCancelRegistration Reg;
+            public DelayedEntry(TGTaskCompletionSource tcs, float dueTime, TimeMode timeMode, TGCancelRegistration reg)
             {
                 Tcs = tcs;
                 DueTime = dueTime;
                 TimeMode = timeMode;
+                Reg = reg;
             }
         }
 
@@ -86,7 +104,13 @@ namespace TryGet.Async
         {
             public readonly TGTaskCompletionSource Tcs;
             public readonly long DueFrame;
-            public FrameEntry(TGTaskCompletionSource tcs, long dueFrame) { Tcs = tcs; DueFrame = dueFrame; }
+            public readonly TGCancelRegistration Reg;
+            public FrameEntry(TGTaskCompletionSource tcs, long dueFrame, TGCancelRegistration reg)
+            {
+                Tcs = tcs;
+                DueFrame = dueFrame;
+                Reg = reg;
+            }
         }
 
         // ============= 构造函数 =============
@@ -115,24 +139,36 @@ namespace TryGet.Async
 
         public void Shutdown()
         {
-            // 取消所有未完成的 tcs（避免 await 永远 hang）
+            // 取消所有未完成的 tcs（避免 await 永远 hang），并注销其取消 registration
             foreach (var queues in _yieldQueuesByPhase.Values)
             {
-                foreach (var tcs in queues.ThisFrame) { tcs.SetCanceled(); TGTaskCompletionSource.Recycle(tcs); }
-                foreach (var tcs in queues.NextFrame) { tcs.SetCanceled(); TGTaskCompletionSource.Recycle(tcs); }
+                CancelYieldList(queues.ThisFrame);
+                CancelYieldList(queues.NextFrame);
                 queues.ThisFrame.Clear();
                 queues.NextFrame.Clear();
             }
 
             foreach (var delayQueue in _delayQueuesByPhase.Values)
             {
-                foreach (var e in delayQueue) { e.Tcs.SetCanceled(); TGTaskCompletionSource.Recycle(e.Tcs); }
+                for (int i = 0; i < delayQueue.Count; i++)
+                {
+                    var e = delayQueue[i];
+                    e.Reg.Dispose();
+                    if (!e.Tcs.Task.IsCompleted) e.Tcs.SetCanceled();
+                    TGTaskCompletionSource.Recycle(e.Tcs);
+                }
                 delayQueue.Clear();
             }
 
             foreach (var frameQueue in _frameWaitQueuesByPhase.Values)
             {
-                foreach (var e in frameQueue) { e.Tcs.SetCanceled(); TGTaskCompletionSource.Recycle(e.Tcs); }
+                for (int i = 0; i < frameQueue.Count; i++)
+                {
+                    var e = frameQueue[i];
+                    e.Reg.Dispose();
+                    if (!e.Tcs.Task.IsCompleted) e.Tcs.SetCanceled();
+                    TGTaskCompletionSource.Recycle(e.Tcs);
+                }
                 frameQueue.Clear();
             }
 
@@ -142,62 +178,68 @@ namespace TryGet.Async
             _lastProcessedPhase = FramePhase.EndOfFrame;
         }
 
-        // ============= 公共 API =============
-
-        public TGTask Yield()
+        private static void CancelYieldList(List<YieldItem> list)
         {
-            return Yield(FramePhase.Update);
+            for (int i = 0; i < list.Count; i++)
+            {
+                var item = list[i];
+                item.Reg.Dispose();
+                if (!item.Tcs.Task.IsCompleted) item.Tcs.SetCanceled();
+                TGTaskCompletionSource.Recycle(item.Tcs);
+            }
         }
 
-        public TGTask Yield(FramePhase phase)
+        // ============= 公共 API =============
+
+        public TGTask Yield() => Yield(FramePhase.Update, TGCancelToken.None);
+        public TGTask Yield(FramePhase phase) => Yield(phase, TGCancelToken.None);
+        public TGTask Yield(TGCancelToken token) => Yield(FramePhase.Update, token);
+
+        public TGTask Yield(FramePhase phase, TGCancelToken token)
         {
+            if (token.IsCancellationRequested) return TGTask.FromCanceled();
             var tcs = TGTaskCompletionSource.Rent();
             var task = tcs.Task;
-            _yieldQueuesByPhase[phase].NextFrame.Add(tcs);
+            var reg = RegisterCancel(tcs, token);
+            _yieldQueuesByPhase[phase].NextFrame.Add(new YieldItem(tcs, reg));
             return task;
         }
 
-        public TGTask Delay(float seconds)
-        {
-            return Delay(seconds, FramePhase.Update);
-        }
+        public TGTask Delay(float seconds) => Delay(seconds, FramePhase.Update, TimeMode.Scaled, TGCancelToken.None);
+        public TGTask Delay(float seconds, FramePhase phase) => Delay(seconds, phase, TimeMode.Scaled, TGCancelToken.None);
+        public TGTask Delay(float seconds, TimeMode timeMode) => Delay(seconds, FramePhase.Update, timeMode, TGCancelToken.None);
+        public TGTask Delay(float seconds, TGCancelToken token) => Delay(seconds, FramePhase.Update, TimeMode.Scaled, token);
+        public TGTask Delay(float seconds, FramePhase phase, TimeMode timeMode) => Delay(seconds, phase, timeMode, TGCancelToken.None);
 
-        public TGTask Delay(float seconds, FramePhase phase)
+        public TGTask Delay(float seconds, FramePhase phase, TimeMode timeMode, TGCancelToken token)
         {
-            return Delay(seconds, phase, TimeMode.Scaled);
-        }
-
-        public TGTask Delay(float seconds, TimeMode timeMode)
-        {
-            return Delay(seconds, FramePhase.Update, timeMode);
-        }
-
-        public TGTask Delay(float seconds, FramePhase phase, TimeMode timeMode)
-        {
+            if (token.IsCancellationRequested) return TGTask.FromCanceled();
             if (seconds < 0) throw new ArgumentOutOfRangeException(nameof(seconds), "Delay seconds must be >= 0");
+
             var tcs = TGTaskCompletionSource.Rent();
             var task = tcs.Task;
+            var reg = RegisterCancel(tcs, token);
             if (seconds == 0)
             {
-                _yieldQueuesByPhase[phase].NextFrame.Add(tcs);
+                _yieldQueuesByPhase[phase].NextFrame.Add(new YieldItem(tcs, reg));
             }
             else
             {
                 float dueTime = timeMode == TimeMode.Scaled
                     ? _elapsedTime + seconds
                     : _unscaledElapsedTime + seconds;
-                _delayQueuesByPhase[phase].Add(new DelayedEntry(tcs, dueTime, timeMode));
+                _delayQueuesByPhase[phase].Add(new DelayedEntry(tcs, dueTime, timeMode, reg));
             }
             return task;
         }
 
-        public TGTask WaitForFrames(int frameCount)
-        {
-            return WaitForFrames(frameCount, FramePhase.Update);
-        }
+        public TGTask WaitForFrames(int frameCount) => WaitForFrames(frameCount, FramePhase.Update, TGCancelToken.None);
+        public TGTask WaitForFrames(int frameCount, FramePhase phase) => WaitForFrames(frameCount, phase, TGCancelToken.None);
+        public TGTask WaitForFrames(int frameCount, TGCancelToken token) => WaitForFrames(frameCount, FramePhase.Update, token);
 
-        public TGTask WaitForFrames(int frameCount, FramePhase phase)
+        public TGTask WaitForFrames(int frameCount, FramePhase phase, TGCancelToken token)
         {
+            if (token.IsCancellationRequested) return TGTask.FromCanceled();
             if (frameCount < 0) throw new ArgumentOutOfRangeException(nameof(frameCount), "frameCount must be >= 0");
             if (frameCount == 0)
             {
@@ -207,13 +249,29 @@ namespace TryGet.Async
 
             var tcs = TGTaskCompletionSource.Rent();
             var task = tcs.Task;
-            _frameWaitQueuesByPhase[phase].Add(new FrameEntry(tcs, _frameCount + frameCount));
+            var reg = RegisterCancel(tcs, token);
+            _frameWaitQueuesByPhase[phase].Add(new FrameEntry(tcs, _frameCount + frameCount, reg));
             return task;
         }
 
-        public TGTask DelayUntilPhase(FramePhase phase)
+        public TGTask DelayUntilPhase(FramePhase phase) => Yield(phase);
+
+        /// <summary>
+        /// 取消注册：token 取消时，把仍 pending 的 tcs 置为 canceled（body SetException OCE）。
+        ///
+        /// 关键取舍（ADR-0021 D6/D7，见 TGTaskBody 读码结论）：取消回调**只** SetCanceled，不主动移除队列 entry，
+        /// 因为 body 的 SetResult/SetException 幂等、且 tcs 一旦被 await 消费侧回收+Reset 后 version 会变，
+        /// 此时由 ProcessXxxQueue 统一用 <c>tcs.Task.IsCompleted</c> 检测并跳过 SetResult、回收 entry + 注销 reg。
+        /// guard <c>!IsCompleted</c> 防止对已完成/已回收的 tcs 误操作。None token 返回 inert registration。
+        /// </summary>
+        private static TGCancelRegistration RegisterCancel(TGTaskCompletionSource tcs, TGCancelToken token)
         {
-            return Yield(phase);
+            if (token.Source == null) return default; // None：永不取消，无需注册
+            return token.Register(() =>
+            {
+                if (!tcs.Task.IsCompleted)
+                    tcs.SetCanceled();
+            });
         }
 
         // ============= IUpdateModule 接口实现 =============
@@ -282,11 +340,13 @@ namespace TryGet.Async
             // 处理 ThisFrame 队列
             for (int i = 0; i < queues.ThisFrame.Count; i++)
             {
-                var tcs = queues.ThisFrame[i];
-                tcs.SetResult();
+                var item = queues.ThisFrame[i];
+                item.Reg.Dispose();                 // 注销取消注册（D7）
+                if (!item.Tcs.Task.IsCompleted)     // 未被取消才完成；已取消则跳过 SetResult（body 已 OCE / 已回收）
+                    item.Tcs.SetResult();
                 // body 由 await 消费侧（Awaiter.GetResult）自动回池；
                 // tcs 对象本身在此处立即回收复用（task 句柄在排队时已发出）
-                TGTaskCompletionSource.Recycle(tcs);
+                TGTaskCompletionSource.Recycle(item.Tcs);
             }
             queues.ThisFrame.Clear();
         }
@@ -298,9 +358,20 @@ namespace TryGet.Async
             for (int i = delayQueue.Count - 1; i >= 0; i--)
             {
                 var e = delayQueue[i];
+
+                // 已被取消（token）：清理 entry，不再 SetResult（避免 await 消费后 version mismatch 抛 Expired）
+                if (e.Tcs.Task.IsCompleted)
+                {
+                    e.Reg.Dispose();
+                    TGTaskCompletionSource.Recycle(e.Tcs);
+                    delayQueue.RemoveAt(i);
+                    continue;
+                }
+
                 float currentTime = e.TimeMode == TimeMode.Scaled ? _elapsedTime : _unscaledElapsedTime;
                 if (e.DueTime <= currentTime)
                 {
+                    e.Reg.Dispose();
                     e.Tcs.SetResult();
                     TGTaskCompletionSource.Recycle(e.Tcs);
                     delayQueue.RemoveAt(i);
@@ -315,8 +386,19 @@ namespace TryGet.Async
             for (int i = frameQueue.Count - 1; i >= 0; i--)
             {
                 var e = frameQueue[i];
+
+                // 已被取消（token）：清理 entry，不再 SetResult
+                if (e.Tcs.Task.IsCompleted)
+                {
+                    e.Reg.Dispose();
+                    TGTaskCompletionSource.Recycle(e.Tcs);
+                    frameQueue.RemoveAt(i);
+                    continue;
+                }
+
                 if (e.DueFrame <= _frameCount)
                 {
+                    e.Reg.Dispose();
                     e.Tcs.SetResult();
                     TGTaskCompletionSource.Recycle(e.Tcs);
                     frameQueue.RemoveAt(i);

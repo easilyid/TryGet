@@ -2,7 +2,8 @@
     "name": "MyTryGetFramework.Samples.UnityEntry",
     "rootNamespace": "TryGet.Samples.Unity",
     "references": [
-        "MyTryGetFramework.Core"
+        "MyTryGetFramework.Core",
+        "MyTryGetFramework.Unity"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

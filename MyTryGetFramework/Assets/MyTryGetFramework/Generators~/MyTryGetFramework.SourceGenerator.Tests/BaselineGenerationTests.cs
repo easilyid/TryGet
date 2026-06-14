@@ -76,5 +76,71 @@ namespace App { public static class Handlers {} }";
 
             Assert.That(result.GeneratedSources, Is.Empty, "没有 [EventHandler] 时不应生成 manifest");
         }
+
+        // ========== C5 Snapshot 修复回归点：单程序集多条目 → N metadata + 1 register ==========
+        // 这是 ModuleRegistry/EventHandlerRegistry.Snapshot 必须按 metadata 数（而非委托数）计长的根因输入：
+        // 若按委托数（每程序集 1）计长，单程序集 2+ 模块/handler 时 Snapshot 会截断丢弃多余 metadata。
+
+        [Test]
+        public void ModuleManifest_TwoModulesOneAssembly_EmitsTwoMetadataOneRegister()
+        {
+            const string src = @"
+namespace App
+{
+    public interface IFoo : TryGet.IModule {}
+    public interface IBar : TryGet.IModule {}
+
+    [TryGet.Module(typeof(IFoo))]
+    public sealed class Foo : IFoo {}
+
+    [TryGet.Module(typeof(IBar))]
+    public sealed class Bar : IBar {}
+}";
+            var result = GeneratorTestHelper.Run(new ModuleManifestGenerator(), src);
+
+            Assert.That(result.CompilationErrors, Is.Empty, result.AllGeneratedText);
+            Assert.That(CountOf(result.AllGeneratedText, "global::TryGet.ModuleRegistry.RegisterWithMetadata("),
+                Is.EqualTo(2), "每个 [Module] 应各发一条 RegisterWithMetadata（metadata 数 = 模块数）");
+            Assert.That(CountOf(result.AllGeneratedText, "global::TryGet.ModuleRegistry.Register(host =>"),
+                Is.EqualTo(1), "整个程序集只发一个 Register 委托（N:1，正是 Snapshot 易丢 metadata 的场景）");
+        }
+
+        [Test]
+        public void EventHandler_TwoHandlersOneAssembly_EmitsTwoMetadataOneRegister()
+        {
+            const string src = @"
+namespace App
+{
+    public struct DamageEvent { public int Amount; }
+    public struct HealEvent { public int Amount; }
+
+    public static class Handlers
+    {
+        [TryGet.EventHandler]
+        public static void OnDamage(DamageEvent evt) {}
+
+        [TryGet.EventHandler]
+        public static void OnHeal(HealEvent evt) {}
+    }
+}";
+            var result = GeneratorTestHelper.Run(new EventHandlerGenerator(), src);
+
+            Assert.That(result.CompilationErrors, Is.Empty, result.AllGeneratedText);
+            Assert.That(CountOf(result.AllGeneratedText, "global::TryGet.EventHandlerRegistry.RegisterWithMetadata("),
+                Is.EqualTo(2), "每个 [EventHandler] 应各发一条 RegisterWithMetadata（metadata 数 = handler 数）");
+            Assert.That(CountOf(result.AllGeneratedText, "global::TryGet.EventHandlerRegistry.Register(bus =>"),
+                Is.EqualTo(1), "整个程序集只发一个 Register 委托（N:1，正是 Snapshot 易丢 metadata 的场景）");
+        }
+
+        private static int CountOf(string haystack, string needle)
+        {
+            int count = 0, i = 0;
+            while ((i = haystack.IndexOf(needle, i, System.StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                i += needle.Length;
+            }
+            return count;
+        }
     }
 }

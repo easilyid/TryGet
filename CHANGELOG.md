@@ -4,6 +4,58 @@ V0.x 时期：未承诺时间，按 Gate criteria 升版本（design.md §12）�
 
 > **历史段阅读说明**：V0.6–V1.0 历史记录中提及的 `Runtime/Core/Common`、`Runtime/Core/Entity`、`Runtime/Core/Module/EventHandler*`、`IPlugin`、`INetServer`、`ITickLoop/IFrameLoop`、`Samples/Shared`、`ITask/TaskBody` 等路径或能力，在 V2.0 路线 C 重定向（ADR-0020）后已迁移或移除。当前权威布局见 `MyTryGetFramework/Assets/MyTryGetFramework/ARCHITECTURE.md`。
 
+## V2.x — Tests 影子工程（脱离 Unity 跑测试，ADR-0022）
+
+> 2026/06/14。新增 Tests 影子 csproj，与 Core 影子 csproj（ADR-0012）对称，让全部 Core EditMode 测试可脱离 Unity 用 `dotnet test` 跑。
+
+### Added
+
+- **`ServerProject/MyTryGetFramework.Tests/`**：AssemblyName=MyTryGetFramework.Tests（匹配 Core `InternalsVisibleTo`），`<Compile Include>` 反向引用 `Tests/EditMode/**/*.cs`（不复制），引用 Core 影子 csproj + NUnit 3.x。`dotnet test` 跑通 **448 测试，0 失败**。
+- **测试跨端门**：任何 `using UnityEngine` / `[UnityTest]` 渗入 EditMode 测试会让此 csproj 编译失败，强制测试引擎无关（与 Core 双端门对称）。
+
+### Changed
+
+- **TGTaskSchedulerTests**：8 处 async helper fire-and-forget 调用补 `.Forget()`（消除 CS4014，意图显式 + 异常可观测）。
+
+### Verification
+
+- `dotnet test ServerProject/MyTryGetFramework.Tests`：**448 通过（0 失败、0 警告）**；含取消模型 31 例、Timer/Pool 修复、全部既有测试。
+
+### Design Notes
+
+- 补齐 ADR-0012 的缺口：双端门只验「Core 能编译」，未验「测试能跑」。本工程让本地/CI 一条命令跑全部 Core 测试，不再依赖手动开 Unity 重跑（GPT 报告反复提到的痛点）。需要引擎的 PlayMode/MonoBehaviour 测试仍在 Unity 侧。
+
+---
+
+## V2.x — TGTask 取消模型（自研 owner-scope）
+
+> 2026/06/14。为 TGTask 增加取消能力（ADR-0021）：自研轻量 token（非 .NET CancellationToken），句柄式 Abort + token 式 owner-scope + 组合子。三家对标（hsenl/ET/Fantasy）均自研取消。
+
+### Added
+
+- **TGCancelToken / TGCancelSource / TGCancelRegistration**（`Async/TGCancellation.cs`）：自研取消，单线程零锁、池化、version 守卫、O(1) 注销。owner 持 source，`Cancel()` 一次取消其 `Token` 派生的全部 pending（1:N owner-scope）。
+- **TGTaskAbortException : OperationCanceledException**：类型化取消标记。
+- **TGTask.Abort()**（`Async/TGTask.Abort.cs`）：句柄式 1:1 取消（Manual task）；Builder task 抛 `InvalidOperationException`。
+- **Scheduler TGCancelToken 重载**：`Delay`/`Yield`/`WaitForFrames` 各加 token 重载；取消时 pending 以 OCE 完成，registration 完成时注销（无泄漏）。
+- **ProcedureBase owner-scope**：`CancelToken` + `CancelScope()`，`OnExit` 默认取消、`OnPause` 不取消（离栈自动取消其 pending）。
+- **组合子**（`Async/TGTask.Combinators.cs` + `TGCancelSource.CancelAfter`）：`CancelAfter`（超时）、`WhenAll`（异常聚合）、`WhenAny`（首个完成索引）。
+- **测试**：`CancellationTests.cs`（核心类型 + scheduler 重载 + Abort/Forget/owner-scope + 组合子）。
+
+### Changed
+
+- **TGTask.Forget()**：识别 `OperationCanceledException` 后静默（取消不进 `UnobservedException`），真异常仍上报。
+
+### Verification
+
+- Shadow csproj 0 警告 0 错误；临时 .NET 工程三轮端到端验证均 ALL PASS（含 1:N 取消、无 registration 泄漏、version 守卫、组合子）。Unity EditMode 待重跑确认。
+
+### Design Notes
+
+- 方向自研（ADR-0021 D1）：三家同类框架（hsenl `HTaskAborter` / ET `ETCancelToken` / Fantasy `FCancellationToken`）无一用 .NET `CancellationToken`——单线程游戏框架里其线程安全开销与 class 分配是负担。
+- 取消×池化难点（D6/D7）：取消回调只 `SetCanceled`，ProcessQueue 用 `tcs.Task.IsCompleted` 跳过+回收+完成时注销 registration，规避「取消后 await 致 body Reset/version 变，ProcessQueue 再 SetResult 抛 Expired」。
+
+---
+
 ## V2.0 — C9 Pool 诊断快照 + 重复释放检测
 
 > 2026/06/13。补全 IObjectPool 诊断可观察性（计数器 + 峰值 + 命中率）+ DEBUG/UNITY_ASSERTIONS 模式下 HashSet 检测重复 Return。

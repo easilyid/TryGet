@@ -8,7 +8,7 @@ namespace TryGet.SourceGenerator
     /// <summary>
     /// V0.9.5 Iter 5：扫描 <c>[TryGet.EventHandler]</c> 标记静态方法，生成
     /// <c>__EventHandlerManifest_&lt;asm&gt;</c>，在 dual-trigger init 时把 handler 注册到
-    /// <c>TryGet.EventHandlerRegistry</c>，<c>Bootstrap.CreateHost</c> 内部应用到 host.EventBus。
+    /// <c>TryGet.EventHandlerRegistry</c>，<c>GameLauncher.CreateHost</c> 内部应用到 host.EventModule。
     /// </summary>
     [Generator(LanguageNames.CSharp)]
     public sealed class EventHandlerGenerator : IIncrementalGenerator

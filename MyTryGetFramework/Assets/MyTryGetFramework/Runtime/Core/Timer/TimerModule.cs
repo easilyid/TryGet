@@ -192,10 +192,27 @@ namespace TryGet
                             failures.Add(ex);
                         }
 
+                        // callback 内可能对自己 Cancel/Pause。Cancel/Pause 只就地标记 _entries[i]
+                        // （不移位），因此必须把最新状态读回局部 entry，否则下面的 _entries[i] = entry
+                        // 会用 callback 之前的旧快照覆盖，导致周期 timer 的自取消/自暂停失效。
+                        if (!RefreshSelfAfterCallback(i, ref entry))
+                        {
+                            _entries.RemoveAt(i); // callback 取消了自己
+                            continue;
+                        }
+
                         entry.RemainingSeconds += entry.Interval;
+
+                        if (entry.Paused)
+                        {
+                            // callback 暂停了自己：对齐到下一周期并冻结，本帧不再补偿
+                            _entries[i] = entry;
+                            continue;
+                        }
 
                         // 补偿触发：循环直到 RemainingSeconds > 0 或达到 maxCatchUp 上限
                         int compensated = 0;
+                        bool selfInterrupted = false;
                         while (entry.RemainingSeconds <= 0f && compensated < entry.MaxCatchUp)
                         {
                             entry.RemainingSeconds += entry.Interval;
@@ -206,7 +223,22 @@ namespace TryGet
                                 if (failures == null) failures = new List<Exception>();
                                 failures.Add(ex);
                             }
+
+                            // 补偿触发中同样可能自取消/自暂停
+                            if (!RefreshSelfAfterCallback(i, ref entry))
+                            {
+                                _entries.RemoveAt(i);
+                                selfInterrupted = true;
+                                break;
+                            }
+                            if (entry.Paused)
+                            {
+                                _entries[i] = entry;
+                                selfInterrupted = true;
+                                break;
+                            }
                         }
+                        if (selfInterrupted) continue;
 
                         // 如果仍然 <= 0，说明超过 maxCatchUp，直接对齐到下一个周期
                         if (entry.RemainingSeconds <= 0f)
@@ -236,6 +268,21 @@ namespace TryGet
             if (failures != null)
                 throw new AggregateException(
                     "One or more timer callbacks threw. See InnerExceptions.", failures);
+        }
+
+        /// <summary>
+        /// 周期 timer 的 callback 执行后，把自身 entry 在 <see cref="_entries"/> 中的最新状态读回
+        /// 局部副本。callback 只能通过 <see cref="Cancel"/>/<see cref="Pause"/>（就地标记，不移位）
+        /// 或 <see cref="Schedule"/>（追加末尾）修改集合，因此 <c>_entries[index]</c> 仍是同一 entry。
+        /// 返回 false 表示该 timer 已被自身 callback 取消，调用方应将其移除。
+        /// </summary>
+        private bool RefreshSelfAfterCallback(int index, ref Entry entry)
+        {
+            var current = _entries[index];
+            if (current.Cancelled)
+                return false;
+            entry.Paused = current.Paused;
+            return true;
         }
     }
 }

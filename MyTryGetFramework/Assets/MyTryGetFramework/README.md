@@ -4,9 +4,9 @@
 
 ## 核心特性
 
-- **ModuleHost 服务容器** — 统一的模块生命周期管理与依赖注入
+- **ModuleSystem 服务容器** — 统一的模块生命周期管理与依赖注入
 - **FrameLoop 多阶段调度** — EarlyUpdate / Update / LateUpdate / FixedUpdate / EndOfFrame 五阶段分桶执行
-- **自研 TGTask 异步原语** — 零外部依赖的 async/await 支持，带超时与取消
+- **自研 TGTask 异步原语** — 零外部依赖的 async/await 支持，含调度器驱动的帧/秒级延迟；切换/关闭等特定流程会显式取消挂起任务（暂无通用超时或 CancellationToken API）
 - **Procedure Stack 流程管理** — 栈式流程切换（Push/Pop/Replace），支持暂停/恢复
 - **零 GC 事件系统** — 泛型 struct 事件，稳态派发零分配，重入安全
 - **Source Generator 自动注册** — `[Module]` / `[EventHandler]` 特性驱动的编译期代码生成
@@ -18,8 +18,8 @@
 using TryGet;
 using TryGet.Async;
 
-// 创建 Host
-var host = Bootstrap.CreateHost(BootstrapOptions.Default);
+// 创建 Host（GameLauncher 预注册 Core 基础三件套：ILogger / IClock / ITGTaskScheduler）
+var host = GameLauncher.CreateHost();
 
 // 注册模块
 host.Register<ITimerModule>(new TimerModule());

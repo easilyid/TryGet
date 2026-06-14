@@ -2,7 +2,7 @@ using TryGet;
 using TryGet.Async;
 using UnityEngine;
 
-using TryGet.Samples.Unity;
+using TryGet.Unity;
 
 
 /// <summary>
@@ -19,7 +19,9 @@ public class RuntimeVerificationEntry : TryGetMonoEntry
 {
     protected override void Setup(IModuleSystem host)
     {
-        host.Register<ITGTaskScheduler>(new TGTaskScheduler());
+        // ITGTaskScheduler 已由 GameLauncher.CreateHost 默认注册（见 GameLauncher.CreateHost）。
+        // 这里不再重复注册——TryGetMonoEntry.Awake 先 CreateHost 再调本方法，重复 Register 同一
+        // 服务接口会抛 ModuleAlreadyRegisteredException。本验证脚本直接用框架默认 scheduler 即可。
     }
 
     private async void Start()

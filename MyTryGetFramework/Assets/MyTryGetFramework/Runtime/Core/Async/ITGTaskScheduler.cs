@@ -56,5 +56,25 @@ namespace TryGet.Async
 
         /// <summary>等到指定 <paramref name="phase"/> 的下一次执行。</summary>
         TGTask DelayUntilPhase(FramePhase phase);
+
+        // ---- 可取消重载（ADR-0021）：传入 TGCancelToken，取消时绑定的 TGTask 以 OperationCanceledException 完成。 ----
+
+        /// <summary>可取消版 <see cref="Yield()"/>（默认 Update 阶段）。</summary>
+        TGTask Yield(TGCancelToken token);
+
+        /// <summary>可取消版 <see cref="Yield(FramePhase)"/>。</summary>
+        TGTask Yield(FramePhase phase, TGCancelToken token);
+
+        /// <summary>可取消版 <see cref="Delay(float)"/>（默认 Update 阶段、Scaled time）。</summary>
+        TGTask Delay(float seconds, TGCancelToken token);
+
+        /// <summary>可取消版 <see cref="Delay(float, FramePhase, TimeMode)"/>。</summary>
+        TGTask Delay(float seconds, FramePhase phase, TimeMode timeMode, TGCancelToken token);
+
+        /// <summary>可取消版 <see cref="WaitForFrames(int)"/>（默认 Update 阶段）。</summary>
+        TGTask WaitForFrames(int frameCount, TGCancelToken token);
+
+        /// <summary>可取消版 <see cref="WaitForFrames(int, FramePhase)"/>。</summary>
+        TGTask WaitForFrames(int frameCount, FramePhase phase, TGCancelToken token);
     }
 }

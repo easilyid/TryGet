@@ -47,19 +47,19 @@ echo ""
 
 # 5. 检查修复的代码
 echo "5. 修复验证："
-if grep -q "if (phase == FramePhase.EarlyUpdate)" ./Runtime/Core/Async/TGTaskScheduler.cs; then
-    echo "   ✅ TGTaskScheduler frameCount 修复存在"
+if grep -q "phase <= _lastProcessedPhase" ./Runtime/Core/Async/TGTaskScheduler.cs; then
+    echo "   ✅ TGTaskScheduler phase-aware frameCount 修复存在"
 else
-    echo "   ❌ TGTaskScheduler frameCount 修复缺失"
+    echo "   ❌ TGTaskScheduler phase-aware frameCount 修复缺失"
 fi
 
-if grep -q "protected virtual void FixedUpdate" ./Samples/Unity/Entry/TryGetMonoEntry.cs; then
+if grep -q "protected virtual void FixedUpdate" ./Runtime/Unity/TryGetMonoEntry.cs; then
     echo "   ✅ TryGetMonoEntry FixedUpdate 存在"
 else
     echo "   ❌ TryGetMonoEntry FixedUpdate 缺失"
 fi
 
-if grep -q "EndOfFrameCoroutine" ./Samples/Unity/Entry/TryGetMonoEntry.cs; then
+if grep -q "EndOfFrameCoroutine" ./Runtime/Unity/TryGetMonoEntry.cs; then
     echo "   ✅ TryGetMonoEntry EndOfFrame 协程存在"
 else
     echo "   ❌ TryGetMonoEntry EndOfFrame 协程缺失"
@@ -101,15 +101,15 @@ echo "=========================================="
 echo ""
 cat << 'EOF'
 using UnityEngine;
-using TryGet.Core.Module;
-using TryGet.Core.Async;
-using TryGet.Samples.Unity.Entry;
+using TryGet;
+using TryGet.Async;
+using TryGet.Unity;
 
 public class RuntimeVerificationEntry : TryGetMonoEntry
 {
-    protected override void Setup(IModuleHost host)
+    protected override void Setup(IModuleSystem host)
     {
-        host.Register<ITGTaskScheduler>(new TGTaskScheduler());
+        // ITGTaskScheduler 已由 GameLauncher.CreateHost 默认注册。
     }
 
     private async void Start()

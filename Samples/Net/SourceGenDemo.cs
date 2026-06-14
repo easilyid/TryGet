@@ -35,7 +35,7 @@ namespace TryGet.Samples.Net
         public string Greet(string who) => $"Hello from V0.9.5 auto-registered Module, {who}!";
     }
 
-    /// <summary>Iter 5 demo 事件类型。struct 满足 IEventBus 约束。</summary>
+    /// <summary>Iter 5 demo 事件类型。struct 满足 IEventModule 约束。</summary>
     public readonly struct TickEvent
     {
         public readonly int Index;
@@ -55,4 +55,3 @@ namespace TryGet.Samples.Net
     }
 
 }
-

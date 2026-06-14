@@ -14,6 +14,19 @@ namespace TryGet
     /// 通过 await 抛出（同时仍写入 <see cref="LastAsyncError"/> 兼容）。调用者可 <c>await module.Push(...)</c>
     /// 等待切换完成，不再需要轮询 <see cref="IsEntering"/> / <see cref="IsExiting"/>。
     /// 返回值可忽略（不接收返回值时行为与旧版 void API 一致）。
+    ///
+    /// **生命周期异常契约（同步与异步一致）**：<c>OnEnter</c> / <c>OnExit</c> / <c>OnPause</c> /
+    /// <c>OnResume</c>（及其 Async 版本）抛出的异常**不会从切换方法同步逃逸**，而是经返回的切换 task
+    /// 上报（<c>await</c> / <c>GetResult</c> 抛出）并写入 <see cref="LastAsyncError"/>。失败后模块状态有
+    /// 明确定义、不会停在半切换：
+    /// <list type="bullet">
+    ///   <item>Enter 失败：目标 Procedure 仍留在栈上（"已进入但出错"），调用 <see cref="Stop"/> 复位。</item>
+    ///   <item>Exit 失败：栈顶照常移除（退出不可逆）；<see cref="Replace"/> 在 exit 失败时不进入替换目标。</item>
+    ///   <item>Push 的 OnPause 失败：中止 Push，不进入目标，当前 Procedure 仍为栈顶。</item>
+    ///   <item>Pop 的 OnResume 失败：栈顶已退出、下层已成为新栈顶，仅 resume 出错。</item>
+    /// </list>
+    /// 注意：参数校验类错误（id 为空 / 未注册 / 未启动 / 异步切换进行中）仍同步抛
+    /// <see cref="System.InvalidOperationException"/>，与生命周期异常区分。
     /// </summary>
     public interface IProcedureModule : IModule, IUpdateModule
     {

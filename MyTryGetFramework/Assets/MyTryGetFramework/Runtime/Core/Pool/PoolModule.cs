@@ -55,8 +55,21 @@ namespace TryGet
             private long _missCount;
 
 #if UNITY_ASSERTIONS || DEBUG
-            // C9：DEBUG 或 UNITY_ASSERTIONS 模式下检测重复 Return
-            private readonly HashSet<T> _activeSet = new HashSet<T>();
+            // C9：DEBUG 或 UNITY_ASSERTIONS 模式下检测重复 Return。
+            // 用引用相等比较器：池对象可能重写 Equals/GetHashCode 为值相等，默认 comparer 会把
+            // 不同实例误判为同一对象，导致双释放检测误报/漏报。
+            private readonly HashSet<T> _activeSet = new HashSet<T>(ReferenceComparer.Instance);
+
+            /// <summary>
+            /// 按引用判等的比较器。netstandard2.1 无内置 ReferenceEqualityComparer，故自定义；
+            /// 用 RuntimeHelpers.GetHashCode 取与对象重写无关的标识哈希。
+            /// </summary>
+            private sealed class ReferenceComparer : IEqualityComparer<T>
+            {
+                public static readonly ReferenceComparer Instance = new ReferenceComparer();
+                public bool Equals(T x, T y) => ReferenceEquals(x, y);
+                public int GetHashCode(T obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+            }
 #endif
 
             public ObjectPool(Func<T> factory, Action<T> onReturn, int initialSize)

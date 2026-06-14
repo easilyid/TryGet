@@ -51,8 +51,18 @@ Thumbs.db
 # Local agent/runtime state
 .agents/
 .claude/settings.local.json
+COMPLETION-REPORT-*.md
+MyTryGetFramework/.scratch/
+MyTryGetFramework/FIXES_APPLIED*.md
+MyTryGetFramework/PROGRESS_REPORT.md
+MyTryGetFramework/TestLogResults/
+MyTryGetFramework/TestResults*.xml
+MyTryGetFramework/test_output.log
+MyTryGetFramework/ProjectSettings/AI.Assistant/
+MyTryGetFramework/ProjectSettings/Packages/com.unity.ai.assistant/
 
 # Reference framework repositories
 ReferenceFramework/BigCat/
 ReferenceFramework/TEngine/
 ReferenceFramework/hsenl/
+ReferenceFramework/MyFramework/

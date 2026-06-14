@@ -77,7 +77,7 @@ namespace TryGet.Async
             {
                 // 已完成路径：手动 GetResult 检查异常（GetResult 自身吞 result，但会 rethrow exception）
                 try { Body.GetResult(); }
-                catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
+                catch (Exception ex) { if (!(ex is OperationCanceledException)) TGTaskScheduler.RaiseUnobservedException(ex); }
                 if (Body is TGTaskBody tb)
                     TGTaskPool.Return(tb);
             }
@@ -89,7 +89,7 @@ namespace TryGet.Async
                 {
                     if (capturedVersion != capturedBody.Version) return;
                     try { capturedBody.GetResult(); }
-                    catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
+                    catch (Exception ex) { if (!(ex is OperationCanceledException)) TGTaskScheduler.RaiseUnobservedException(ex); }
                     if (capturedBody is TGTaskBody tb2)
                         TGTaskPool.Return(tb2);
                 });
@@ -219,7 +219,7 @@ namespace TryGet.Async
             if (Body.IsCompleted)
             {
                 try { Body.GetResult(); }
-                catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
+                catch (Exception ex) { if (!(ex is OperationCanceledException)) TGTaskScheduler.RaiseUnobservedException(ex); }
                 if (Body is TGTaskBody<T> tb)
                     TGTaskPool.Return(tb);
             }
@@ -231,7 +231,7 @@ namespace TryGet.Async
                 {
                     if (capturedVersion != capturedBody.Version) return;
                     try { capturedBody.GetResult(); }
-                    catch (Exception ex) { TGTaskScheduler.RaiseUnobservedException(ex); }
+                    catch (Exception ex) { if (!(ex is OperationCanceledException)) TGTaskScheduler.RaiseUnobservedException(ex); }
                     if (capturedBody is TGTaskBody<T> tb2)
                         TGTaskPool.Return(tb2);
                 });

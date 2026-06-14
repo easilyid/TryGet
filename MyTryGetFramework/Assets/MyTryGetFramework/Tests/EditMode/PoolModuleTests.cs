@@ -282,5 +282,52 @@ namespace TryGet.Tests
             Assert.AreEqual(1, pool.IdleCount);
 #endif
         }
+
+        // —— 回归：双释放检测必须按引用判等（值相等对象不应误报）——
+
+        // 重写 Equals/GetHashCode 为值相等，用于验证 _activeSet 必须按引用判等
+        private sealed class ValueEqualDummy
+        {
+            public int Value;
+            public override bool Equals(object obj) => obj is ValueEqualDummy o && o.Value == Value;
+            public override int GetHashCode() => Value;
+        }
+
+        [Test]
+        public void Return_ValueEqualButDifferentInstances_NoFalseDoubleRelease()
+        {
+#if UNITY_ASSERTIONS || DEBUG
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new ValueEqualDummy());
+
+            var a = pool.Rent();
+            var b = pool.Rent();
+            Assert.AreNotSame(a, b, "前提：两个不同实例");
+            Assert.AreEqual(a, b, "前提：两者 Equals 值相等（默认 Value=0）");
+
+            // 修复前：_activeSet 用默认 comparer，b 被当作 a，Return(b) 会误报双释放
+            Assert.DoesNotThrow(() => pool.Return(a));
+            Assert.DoesNotThrow(() => pool.Return(b),
+                "值相等但引用不同的对象不应被误判为重复 Return");
+#else
+            Assert.Pass("Release 模式不启用双释放检测");
+#endif
+        }
+
+        [Test]
+        public void Return_ValueEqualType_SameInstanceDoubleReturn_StillThrows()
+        {
+#if UNITY_ASSERTIONS || DEBUG
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new ValueEqualDummy());
+
+            var a = pool.Rent();
+            pool.Return(a);
+            Assert.Throws<InvalidOperationException>(() => pool.Return(a),
+                "同一引用重复 Return 仍应被检测");
+#else
+            Assert.Pass("Release 模式不启用双释放检测");
+#endif
+        }
     }
 }

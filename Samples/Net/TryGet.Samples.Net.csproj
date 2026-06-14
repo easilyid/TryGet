@@ -7,7 +7,7 @@
     （Boot → Login → InGame 三阶段 Procedure 切换），不依赖 UnityEngine。
 
     依赖路径：通过 ProjectReference 引用 Shadow csproj（反向编译 Core 源码）。
-    V0.7 IEntry/Bootstrap 落地后，此样例将被规范化为"IEntry 实现示例"。
+    入口采用 GameLauncher + Entry.Run 静态模式（框架不定义 IEntry interface，见 Samples/Net/Entry.cs）。
   -->
 
   <PropertyGroup>

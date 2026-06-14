@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TryGet.Samples.Unity
+namespace TryGet.Unity
 {
     /// <summary>
     /// V1.0 起 — Unity 端启动模板（MonoBehaviour）。

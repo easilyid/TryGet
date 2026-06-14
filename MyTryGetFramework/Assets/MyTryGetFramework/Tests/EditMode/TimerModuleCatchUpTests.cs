@@ -113,5 +113,28 @@ namespace TryGet.Tests
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 t.ScheduleRepeat(1f, () => { }, maxCatchUp: -1));
         }
+
+        /// <summary>
+        /// 回归：补偿触发期间 callback 取消自己，应立即停止后续补偿并移除 timer，
+        /// 不被 callback 前的旧快照覆盖。
+        /// </summary>
+        [Test]
+        public void ScheduleRepeat_CancelSelfDuringCatchUp_StopsImmediately()
+        {
+            var t = new TimerModule();
+            int hits = 0;
+            TimerHandle h = default;
+            h = t.ScheduleRepeat(1f, () =>
+            {
+                hits++;
+                if (hits == 2) t.Cancel(h); // 在第 2 次（补偿触发）取消自己
+            }, maxCatchUp: int.MaxValue);
+
+            // interval=1, delta=5：主触发(hits=1) + 补偿第 1 次(hits=2) 时自取消，应停止
+            t.Update(5f, 5f);
+
+            Assert.AreEqual(2, hits, "补偿期间自取消应立即停止后续补偿");
+            Assert.AreEqual(0, t.PendingCount, "自取消后周期 timer 被移除");
+        }
     }
 }

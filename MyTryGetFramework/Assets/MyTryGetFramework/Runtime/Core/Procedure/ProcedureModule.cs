@@ -83,10 +83,23 @@ namespace TryGet
             ThrowIfAsync();
             if (_stack.Count == 0)
                 throw new InvalidOperationException("ProcedureModule not started. Call Start first.");
+            if (!_procedures.ContainsKey(target))
+                throw new InvalidOperationException($"Procedure '{target}' not registered.");
 
-            var currentProc = _procedures[_stack[_stack.Count - 1]];
-            currentProc.OnPause(this);
-            return RunTransition(onDone => EnterProcedure(target, onDone));
+            return RunTransition(onDone =>
+            {
+                // 先暂停当前 Procedure 再进入 target。OnPause 抛异常时：与异步失败一致——经切换 task
+                // 上报错误（不逃逸），中止本次 Push，current 仍为栈顶（栈未变）。
+                var currentProc = _procedures[_stack[_stack.Count - 1]];
+                try { currentProc.OnPause(this); }
+                catch (Exception ex)
+                {
+                    _lastAsyncError = ex;
+                    onDone(ex);
+                    return;
+                }
+                EnterProcedure(target, onDone);
+            });
         }
 
         public TGTask Pop()
@@ -100,8 +113,15 @@ namespace TryGet
                 {
                     if (err == null && _stack.Count > 0)
                     {
+                        // 栈顶已退出，resumed 已是新栈顶。OnResume 抛异常时：与异步失败一致——经切换
+                        // task 上报错误（不逃逸），栈状态保持（已退出不可逆，恢复用 Stop）。
                         var resumed = _procedures[_stack[_stack.Count - 1]];
-                        resumed.OnResume(this);
+                        try { resumed.OnResume(this); }
+                        catch (Exception ex)
+                        {
+                            _lastAsyncError = ex;
+                            err = ex;
+                        }
                     }
                     onDone(err);
                 }));
@@ -259,7 +279,15 @@ namespace TryGet
 
             _lastAsyncError = null;
             _stack.Add(id);
-            proc.OnEnter(this);
+            try { proc.OnEnter(this); }
+            catch (Exception ex)
+            {
+                // 同步 OnEnter 失败：与 BeginAsyncEnter 的异步失败一致——记录错误、经切换 task 上报
+                // （不逃逸），proc 保留在栈上（"已进入但出错"，恢复用 Stop）；跳过 OnEnterAsync。
+                _lastAsyncError = ex;
+                onComplete(ex);
+                return;
+            }
 
             if (proc is IAsyncProcedure asyncProc)
                 BeginAsyncEnter(asyncProc, onComplete);
@@ -278,9 +306,13 @@ namespace TryGet
             }
             else
             {
+                // 同步 OnExit 失败：与 BeginSyncExit 的异步失败一致——栈顶照常移除（退出不可逆），
+                // 记录错误、经切换 task 上报（不逃逸）。Replace 在 err != null 时不会进入替换目标。
                 RemoveTop(id);
-                proc.OnExit(this);
-                onComplete(null);
+                Exception err = null;
+                try { proc.OnExit(this); }
+                catch (Exception ex) { _lastAsyncError = ex; err = ex; }
+                onComplete(err);
             }
         }
 

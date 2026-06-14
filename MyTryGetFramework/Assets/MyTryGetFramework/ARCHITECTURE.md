@@ -26,10 +26,12 @@ Assets/MyTryGetFramework/
 │   │   │   ├── GameLauncher.cs / LauncherOptions.cs
 │   │   │   ├── ModuleAttribute.cs / ModuleRegistry.cs
 │   │   │   └── ModuleExceptions.cs
-│   │   ├── Async/                                # 异步原语（自研，零外部依赖）
+│   │   ├── Async/                                # 异步原语 + 取消（自研，零外部依赖）
 │   │   │   ├── TGTask.cs / TGTaskBody.cs / TGTaskCompletionSource.cs
+│   │   │   ├── TGTask.Abort.cs / TGTask.Combinators.cs            # 句柄式 Abort + WhenAll/WhenAny（ADR-0021）
 │   │   │   ├── AsyncTGTaskMethodBuilder.cs / TGTaskPool.cs
 │   │   │   ├── ITGTaskScheduler.cs / TGTaskScheduler.cs
+│   │   │   ├── TGCancellation.cs / TGTaskAbortException.cs        # 取消 token/source/registration（ADR-0021）
 │   │   │   ├── TGTaskExpiredException.cs / TGTaskType.cs
 │   │   │   └── TimerModuleAsyncExtensions.cs
 │   │   ├── Time/                                 # 时间源
@@ -51,8 +53,9 @@ Assets/MyTryGetFramework/
 │   │   └── Net/                                  # 客户端网络（仅契约）
 │   │       ├── INetClient.cs (V2.0 简化版)
 │   │       └── INetMessage.cs
-│   └── Unity/                                    # Unity Adapter（V2.0 暂为空）
-│       └── MyTryGetFramework.Unity.asmdef
+│   └── Unity/                                    # Unity Adapter（MonoBehaviour 桥接层）
+│       ├── MyTryGetFramework.Unity.asmdef
+│       └── TryGetMonoEntry.cs                    # Unity 启动入口模板（abstract MonoBehaviour）
 └── Tests/
     └── EditMode/                                 # 纯 C# 测试 (noEngineReferences: true)
         └── MyTryGetFramework.Tests.asmdef
@@ -116,16 +119,21 @@ proc.Pop();                  // 栈: [Gameplay]
 | `Replace("C")` | [A, B] → [A, C] | B.OnExit + C.OnEnter |
 | `Stop()` | [A, B, C] → [] | C/B/A.OnExit（逆序） |
 
-## 双端门（ADR-0012 规划保留，物理未落地）
+## 双端门（ADR-0012 已落地）
 
 ```
-ServerProject/MyTryGetFramework.Core/
-└── MyTryGetFramework.Core.csproj  # netstandard2.1，反向引用 Core/**/*.cs（待实现）
+ServerProject/
+├── MyTryGetFramework.Core/
+│   └── MyTryGetFramework.Core.csproj   # netstandard2.1，<Compile Include> 反向引用 Core/**/*.cs（不复制源码）
+└── MyTryGetFramework.Tests/
+    └── MyTryGetFramework.Tests.csproj  # net8.0 NUnit，反向引用 Tests/EditMode/*.cs，dotnet test 脱离 Unity 跑（ADR-0022）
 ```
 
-**当前状态**：Core asmdef 已设置 `noEngineReferences: true` 在编译期物理禁止引用 UnityEngine，但独立的 netstandard2.1 csproj 与 `dotnet build` CI 门尚未建立。现有 `MyTryGetFramework.Core.csproj` 是 Unity/Rider 自动生成的 IDE 影子工程（v4.7.1，含 UNITY_* 宏），不是双端验证用的手写 csproj。
+**当前状态**：已落地手写影子 csproj。Core asmdef 设 `noEngineReferences: true`，在 Unity 端编译期物理禁止引用 UnityEngine；`ServerProject/MyTryGetFramework.Core/MyTryGetFramework.Core.csproj` 则在纯 .NET（netstandard2.1）下用 `<Compile Include>` 反向引用 `Runtime/Core/**/*.cs`（通配自动覆盖新增文件，不复制），并把 Source Generator 作为 Analyzer 引用。`dotnet build` 通过（0 警告 0 错误）即证明 Core 树跨端可编、无 UnityEngine 依赖——任何 `using UnityEngine` 渗入 Core 都会让此 csproj 编译失败，这就是"双端门"。
 
-ADR-0012 决策保留为"门保留"（V2.0 纯客户端阶段不引入服务端业务代码），待后续补齐真实 ServerProject 手写 csproj 实现双端编译验证。
+服务端业务代码（INetServer 等）按 ADR-0020 仍推迟到 V3.0+，本门当前仅用于验证 Core 的引擎无关性。
+
+**测试影子（ADR-0022）**：`ServerProject/MyTryGetFramework.Tests/` 与 Core 影子对称——EditMode 测试 asmdef `noEngineReferences: true`、零 UnityEngine 依赖，故 `<Compile Include>` 反向引用后 `dotnet test` 可脱离 Unity 跑通全部 Core 测试（448 通过），补齐双端门只验「编译」、未验「测试运行」的缺口（形成「测试跨端门」）。
 
 ## 核心 ADR 索引
 
@@ -136,16 +144,16 @@ ADR-0012 决策保留为"门保留"（V2.0 纯客户端阶段不引入服务端�
 | 0007 | Aspect 隔离纪律 | **Superseded by ADR-0020** |
 | 0008 | V0.1 System 注册 | **Superseded by ADR-0020** |
 | 0009 | Query All-of + None-of | **Superseded by ADR-0020** |
-| 0010 | Entity-level + World-level Event | **Superseded by ADR-0020**（仅保留全局 IEventBus） |
-| 0011 | ModuleHost + IModule 契约 | V0.2 落地，V2.0 继续有效 |
-| 0012 | Shadow csproj 双端编译 | 规划保留（Core noEngineReferences 已落地，独立 csproj 待补） |
+| 0010 | Entity-level + World-level Event | **Superseded by ADR-0020**（仅保留全局 IEventModule） |
+| 0011 | ModuleSystem + IModule 契约 | V0.2 落地，V2.0 继续有效 |
+| 0012 | Shadow csproj 双端编译 | **V2.0 落地**（Core noEngineReferences + 手写 netstandard2.1 csproj，`dotnet build` 0/0 通过） |
 | 0013-0019 | 已被 ADR-0020 整体取代 | **Superseded by ADR-0020** |
 | **0020** | **路线 C 重定向：纯客户端服务框架** | **V2.0 落地** |
 
-## V2.0 ModuleHost 使用模式
+## V2.0 ModuleSystem 使用模式
 
 ```csharp
-var host = Bootstrap.CreateHost(BootstrapOptions.Default);
+var host = GameLauncher.CreateHost();
 
 // 业务 Module 注册
 host.Register<ITimerModule>(new TimerModule());
@@ -174,7 +182,7 @@ host.Shutdown();
 | 版本 | 主题 |
 |------|------|
 | V2.1 | 事件系统升级（稳态 Publish 零 GC + 派发中增删 next-publish-only + handler 异常隔离；Source Gen 事件接口后续继续）★ 代码实现完成；Shadow csproj 与生成测试 csproj build 通过；Unity EditMode 运行验证待办 |
-| V2.2 | ModuleHost 多阶段 Update（EarlyUpdate + FixedUpdate + EndOfFrame）★ 已随 V2.0 提前落地（ModuleHost 5 阶段派发 + 执行表分桶；FramePhase 枚举待 C3 决定去留） |
+| V2.2 | ModuleSystem 多阶段 Update（EarlyUpdate + FixedUpdate + EndOfFrame）★ 已随 V2.0 提前落地（ModuleSystem 5 阶段派发 + 执行表分桶；FramePhase 枚举待 C3 决定去留） |
 | V2.3 | UI 框架（IUIModule + UIWindow/UIWidget） |
 | V2.4 | 资源管理（IAssetModule + YooAsset Adapter） |
 | V2.5 | 场景管理（ISceneModule + Unity SceneManager） |

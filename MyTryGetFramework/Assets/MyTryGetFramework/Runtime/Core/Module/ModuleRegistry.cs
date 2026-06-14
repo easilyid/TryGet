@@ -25,6 +25,8 @@ namespace TryGet
     {
         private static readonly List<Action<IModuleSystem>> _registrations = new List<Action<IModuleSystem>>();
         private static readonly List<ModuleRegistrationInfo> _metadata = new List<ModuleRegistrationInfo>();
+        private static int _claimedMetadataCount;
+        private static int _legacyRegistrationCount;
 
         /// <summary>
         /// C5：注册 Module 的结构化元数据（类型/服务接口/来源 assembly）。
@@ -46,6 +48,12 @@ namespace TryGet
         {
             if (registration == null) throw new ArgumentNullException(nameof(registration));
             _registrations.Add(registration);
+
+            int pendingMetadataCount = _metadata.Count - _claimedMetadataCount;
+            if (pendingMetadataCount > 0)
+                _claimedMetadataCount = _metadata.Count;
+            else
+                _legacyRegistrationCount++;
         }
 
         /// <summary>
@@ -70,15 +78,17 @@ namespace TryGet
         /// </summary>
         public static IReadOnlyList<ModuleRegistrationInfo> Snapshot()
         {
-            // _metadata.Count 可能 < _registrations.Count（旧生成代码或手动注册未调 RegisterWithMetadata）
-            var result = new ModuleRegistrationInfo[_registrations.Count];
-            for (int i = 0; i < result.Length; i++)
-            {
-                if (i < _metadata.Count)
-                    result[i] = _metadata[i];
-                else
-                    result[i] = new ModuleRegistrationInfo(null, null, "unknown");
-            }
+            // 新生成器对单个程序集发 N 条 RegisterWithMetadata（每 [Module] 一条）+ 1 个 Register 委托，
+            // 因此 _metadata.Count 才是模块数，_registrations.Count 只是「程序集/批次数」。
+            // 历史实现按 _registrations.Count 分配，会在「单程序集多模块」时把多出的 metadata 截断丢弃。
+            // Register 时记录没有对应 metadata 的 legacy 委托，避免「2 metadata + 1 新委托 + 1 legacy 委托」
+            // 被 _registrations.Count - _metadata.Count 错算成 0。
+            int legacyCount = _legacyRegistrationCount;
+            var result = new ModuleRegistrationInfo[_metadata.Count + legacyCount];
+            for (int i = 0; i < _metadata.Count; i++)
+                result[i] = _metadata[i];
+            for (int i = 0; i < legacyCount; i++)
+                result[_metadata.Count + i] = new ModuleRegistrationInfo(null, null, "unknown");
             return result;
         }
 
@@ -89,6 +99,8 @@ namespace TryGet
         {
             _registrations.Clear();
             _metadata.Clear();
+            _claimedMetadataCount = 0;
+            _legacyRegistrationCount = 0;
         }
     }
 }

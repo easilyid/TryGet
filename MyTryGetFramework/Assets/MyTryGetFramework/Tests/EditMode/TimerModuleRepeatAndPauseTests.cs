@@ -223,5 +223,52 @@ namespace TryGet.Tests
             Assert.IsFalse(fired1, "h1 暂停未触发");
             Assert.IsTrue(fired2, "h2 正常触发");
         }
+
+        // —— callback 内对自身 Cancel/Pause（回归：旧实现会被 callback 前的旧快照覆盖）——
+
+        [Test]
+        public void ScheduleRepeat_CancelSelfInsideCallback_StopsFutureFires()
+        {
+            var t = new TimerModule();
+            int hits = 0;
+            TimerHandle h = default;
+            h = t.ScheduleRepeat(1f, () =>
+            {
+                hits++;
+                t.Cancel(h); // 周期 timer 在自己的 callback 内取消自己
+            });
+
+            t.Update(1f, 1f);
+            Assert.AreEqual(1, hits);
+
+            t.Update(1f, 1f);
+            t.Update(1f, 1f);
+            Assert.AreEqual(1, hits, "callback 内自取消后不应再触发");
+            Assert.AreEqual(0, t.PendingCount, "自取消的周期 timer 应被移除");
+        }
+
+        [Test]
+        public void ScheduleRepeat_PauseSelfInsideCallback_FreezesUntilResume()
+        {
+            var t = new TimerModule();
+            int hits = 0;
+            TimerHandle h = default;
+            h = t.ScheduleRepeat(1f, () =>
+            {
+                hits++;
+                t.Pause(h); // 周期 timer 在自己的 callback 内暂停自己
+            });
+
+            t.Update(1f, 1f);
+            Assert.AreEqual(1, hits);
+            Assert.IsTrue(t.IsPaused(h), "callback 内自暂停应生效");
+
+            t.Update(10f, 10f);
+            Assert.AreEqual(1, hits, "自暂停后不应再触发");
+
+            t.Resume(h);
+            t.Update(1f, 1f);
+            Assert.AreEqual(2, hits, "Resume 后恢复触发");
+        }
     }
 }

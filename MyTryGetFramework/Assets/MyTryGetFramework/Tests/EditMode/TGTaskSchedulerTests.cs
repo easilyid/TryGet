@@ -272,7 +272,7 @@ namespace TryGet.Tests
             host.Initialize();
 
             bool executed = false;
-            AsyncYieldPhase(scheduler, FramePhase.LateUpdate, () => executed = true);
+            AsyncYieldPhase(scheduler, FramePhase.LateUpdate, () => executed = true).Forget();
 
             // EarlyUpdate, FixedUpdate, Update 都不应执行
             host.EarlyUpdate(0.016f, 0.016f);
@@ -298,7 +298,7 @@ namespace TryGet.Tests
             host.Initialize();
 
             bool executed = false;
-            AsyncYieldPhase(scheduler, FramePhase.EndOfFrame, () => executed = true);
+            AsyncYieldPhase(scheduler, FramePhase.EndOfFrame, () => executed = true).Forget();
 
             // 前面所有 Phase 都不应执行
             host.EarlyUpdate(0.016f, 0.016f);
@@ -321,7 +321,7 @@ namespace TryGet.Tests
             host.Initialize();
 
             bool executed = false;
-            AsyncDelayUntilPhase(scheduler, FramePhase.LateUpdate, () => executed = true);
+            AsyncDelayUntilPhase(scheduler, FramePhase.LateUpdate, () => executed = true).Forget();
 
             host.EarlyUpdate(0.016f, 0.016f);
             host.FixedUpdate(0.016f, 0.016f);
@@ -341,7 +341,7 @@ namespace TryGet.Tests
             host.Initialize();
 
             bool executed = false;
-            AsyncDelayPhase(scheduler, 0.045f, FramePhase.FixedUpdate, () => executed = true);
+            AsyncDelayPhase(scheduler, 0.045f, FramePhase.FixedUpdate, () => executed = true).Forget();
 
             // 第一帧：时间不够 (0.016)
             host.EarlyUpdate(0.016f, 0.016f);
@@ -370,7 +370,7 @@ namespace TryGet.Tests
             host.Initialize();
 
             bool executed = false;
-            AsyncWaitFramesPhase(scheduler, 2, FramePhase.EarlyUpdate, () => executed = true);
+            AsyncWaitFramesPhase(scheduler, 2, FramePhase.EarlyUpdate, () => executed = true).Forget();
 
             // 第一帧
             host.EarlyUpdate(0.016f, 0.016f);
@@ -391,9 +391,9 @@ namespace TryGet.Tests
 
             bool earlyExecuted = false, updateExecuted = false, lateExecuted = false;
 
-            AsyncYieldPhase(scheduler, FramePhase.EarlyUpdate, () => earlyExecuted = true);
-            AsyncYieldPhase(scheduler, FramePhase.Update, () => updateExecuted = true);
-            AsyncYieldPhase(scheduler, FramePhase.LateUpdate, () => lateExecuted = true);
+            AsyncYieldPhase(scheduler, FramePhase.EarlyUpdate, () => earlyExecuted = true).Forget();
+            AsyncYieldPhase(scheduler, FramePhase.Update, () => updateExecuted = true).Forget();
+            AsyncYieldPhase(scheduler, FramePhase.LateUpdate, () => lateExecuted = true).Forget();
 
             // 依次执行各 Phase
             host.EarlyUpdate(0.016f, 0.016f);

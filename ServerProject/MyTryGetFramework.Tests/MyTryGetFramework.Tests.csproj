@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests Shadow csproj（ADR-0022，对标 Core 的 ADR-0012）。
+
+    用途：EditMode 测试 asmdef `noEngineReferences: true`、零 UnityEngine 依赖，因此可在纯 .NET 下
+    用 NUnit 真实运行，无需 Unity Editor。让本地 / CI 一条 `dotnet test` 跑通全部 Core 逻辑测试，
+    补齐「Unity EditMode 无法本地 / CI 重跑」的缺口。
+
+    源码 100% 共享：通过 <Compile Include> 反向引用 Unity 项目下的 Tests/EditMode/*.cs（**不复制**）。
+    新增测试文件无需改 csproj（通配自动覆盖）。
+
+    AssemblyName 必须为 MyTryGetFramework.Tests —— 匹配 Core 的
+    [assembly: InternalsVisibleTo("MyTryGetFramework.Tests")]，使测试能访问 Core internal 诊断钩子。
+
+    维护规则：
+    - 任何 `using UnityEngine` / `[UnityTest]` 渗入 EditMode 测试都会让此 csproj 编译失败 —— 这是
+      「测试跨端门」，与 Core 的双端门对称。需要 Unity-only 的测试请放 PlayMode（不在此工程）。
+    - NUnit 版本对齐 Unity Test Framework 的 NUnit 3.x 谱系（经典 Assert 模型）。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>MyTryGetFramework.Tests</AssemblyName>
+    <RootNamespace>TryGet.Tests</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 关闭 SDK 默认 Compile 通配，手动反向包含 Unity 项目下的测试源 -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\MyTryGetFramework\Assets\MyTryGetFramework\Tests\EditMode\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyTryGetFramework.Core\MyTryGetFramework.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+</Project>

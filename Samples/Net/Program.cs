@@ -11,7 +11,7 @@ namespace TryGet.Samples.Net
     /// - 主循环 + Module 注册 + 异常处理 全部归并到 <see cref="Entry.Run"/>
     /// - Program.Main 减为 ~15 行业务逻辑
     /// - Logger 升级到 V0.7 <see cref="ILogger"/>（替代 V0.6 <see cref="ILogModule"/>）
-    /// - <see cref="IClock"/> 新增自动注册（Bootstrap 默认）— sample 内未直接使用，预留 V0.8+ 流程参考
+    /// - <see cref="IClock"/> 新增自动注册（GameLauncher 默认）— sample 内未直接使用，预留 V0.8+ 流程参考
     /// </summary>
     internal static class Program
     {

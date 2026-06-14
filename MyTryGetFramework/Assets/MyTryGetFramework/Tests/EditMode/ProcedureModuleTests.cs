@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
+using TryGet.Async;
 
 namespace TryGet.Tests
 {
@@ -438,6 +439,111 @@ namespace TryGet.Tests
             Assert.AreEqual(new[] { "exit:c", "exit:b", "exit:a" }, log.ToArray());
             Assert.AreEqual(0, p.StackDepth);
             Assert.IsFalse(p.IsRunning);
+        }
+
+        // ==================== Finding 2: 同步生命周期异常契约（与异步一致，不逃逸） ====================
+
+        /// <summary>可配置在某个同步生命周期钩子里抛异常的测试 Procedure。</summary>
+        private class ThrowingProc : ProcedureBase
+        {
+            public enum Hook { Enter, Exit, Pause, Resume }
+            private readonly Hook _hook;
+            public ThrowingProc(Hook hook) { _hook = hook; }
+
+            public override void OnEnter(IProcedureModule m) { if (_hook == Hook.Enter) throw new InvalidOperationException("enter-boom"); }
+            public override void OnExit(IProcedureModule m) { if (_hook == Hook.Exit) throw new InvalidOperationException("exit-boom"); }
+            public override void OnPause(IProcedureModule m) { if (_hook == Hook.Pause) throw new InvalidOperationException("pause-boom"); }
+            public override void OnResume(IProcedureModule m) { if (_hook == Hook.Resume) throw new InvalidOperationException("resume-boom"); }
+        }
+
+        [Test]
+        public void Start_SyncOnEnterThrows_DoesNotEscape_ReportsViaTaskAndLastAsyncError()
+        {
+            var p = new ProcedureModule();
+            p.OnInit(null);
+            p.AddProcedure("boot", new ThrowingProc(ThrowingProc.Hook.Enter));
+
+            // 不同步逃逸：错误经切换 task 上报（与异步 OnEnterAsync 抛出一致）
+            var t = p.Start("boot");
+            Assert.IsTrue(t.IsCompleted);
+            var ex = Assert.Throws<InvalidOperationException>(() => t.GetAwaiter().GetResult());
+            Assert.AreEqual("enter-boom", ex.Message);
+            Assert.IsNotNull(p.LastAsyncError);
+            // enter 失败：proc 仍留栈上（与异步 enter 失败一致），恢复用 Stop
+            Assert.IsTrue(p.IsRunning);
+            Assert.AreEqual("boot", p.CurrentProcedure);
+        }
+
+        [Test]
+        public void Replace_SyncOnExitThrows_DoesNotEnterTarget_ReportsError()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.OnInit(null);
+            p.AddProcedure("a", new ThrowingProc(ThrowingProc.Hook.Exit));
+            p.AddProcedure("b", new TracingProcedure(log, "b"));
+            p.Start("a");
+
+            var t = p.Replace("b");
+            Assert.IsTrue(t.IsCompleted);
+            Assert.Throws<InvalidOperationException>(() => t.GetAwaiter().GetResult());
+            Assert.IsNotNull(p.LastAsyncError);
+            // exit 失败：栈顶照常移除、不进入 target b（b 从未 OnEnter）
+            Assert.IsFalse(log.Contains("enter:b"), "exit 失败时不应进入替换目标");
+            Assert.AreEqual(0, p.StackDepth);
+        }
+
+        [Test]
+        public void Push_SyncOnPauseThrows_AbortsAndKeepsCurrent()
+        {
+            var p = new ProcedureModule();
+            p.OnInit(null);
+            p.AddProcedure("game", new ThrowingProc(ThrowingProc.Hook.Pause));
+            p.AddProcedure("pause", new TracingProcedure(null, "pause"));
+            p.Start("game");
+
+            var t = p.Push("pause");
+            Assert.IsTrue(t.IsCompleted);
+            Assert.Throws<InvalidOperationException>(() => t.GetAwaiter().GetResult());
+            Assert.IsNotNull(p.LastAsyncError);
+            // OnPause 失败：中止 Push，不进入 pause，game 仍为栈顶
+            Assert.AreEqual("game", p.CurrentProcedure);
+            Assert.AreEqual(1, p.StackDepth);
+        }
+
+        [Test]
+        public void Pop_SyncOnResumeThrows_TopExited_ReportsError()
+        {
+            var log = new List<string>();
+            var p = new ProcedureModule();
+            p.OnInit(null);
+            p.AddProcedure("game", new ThrowingProc(ThrowingProc.Hook.Resume));
+            p.AddProcedure("menu", new TracingProcedure(log, "menu"));
+            p.Start("game");
+            p.Push("menu");
+
+            var t = p.Pop();
+            Assert.IsTrue(t.IsCompleted);
+            Assert.Throws<InvalidOperationException>(() => t.GetAwaiter().GetResult());
+            Assert.IsNotNull(p.LastAsyncError);
+            // 栈顶 menu 已退出、game 成为新栈顶，仅 resume 出错
+            Assert.IsTrue(log.Contains("exit:menu"), "栈顶应已正常退出");
+            Assert.AreEqual("game", p.CurrentProcedure);
+            Assert.AreEqual(1, p.StackDepth);
+        }
+
+        [Test]
+        public void Push_NotRegistered_ThrowsBeforePausingCurrent()
+        {
+            var p = new ProcedureModule();
+            p.OnInit(null);
+            p.AddProcedure("game", new TracingProcedure(null, "game"));
+            p.Start("game");
+
+            // target 未注册属参数校验：先于 OnPause 同步抛，不留下"已暂停的栈顶"
+            Assert.Throws<InvalidOperationException>(() => p.Push("missing"));
+            Assert.AreEqual("game", p.CurrentProcedure);
+            Assert.AreEqual(1, p.StackDepth);
         }
 
         // 帮助类：在第 N 次 Update 时触发 Replace
