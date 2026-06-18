@@ -121,6 +121,24 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void GetDiagnostics_RentingPrewarmedObject_CountsAsHit()
+        {
+            var p = new PoolModule();
+            var pool = p.GetOrCreatePool(() => new Dummy(), initialSize: 2);
+
+            pool.Rent();
+
+            var diag = pool.GetDiagnostics();
+
+            Assert.AreEqual(1, diag.TotalRented);
+            Assert.AreEqual(1, diag.CurrentActive);
+            Assert.AreEqual(1, diag.IdleCount);
+            Assert.AreEqual(1, diag.PeakActive);
+            Assert.AreEqual(1, diag.HitCount, "从 initialSize 预热对象 Rent 应计为 hit");
+            Assert.AreEqual(0, diag.MissCount);
+        }
+
+        [Test]
         public void GetDiagnostics_MultipleRentReturnCycles_AccumulatesCounters()
         {
             var p = new PoolModule();

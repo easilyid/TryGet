@@ -14,6 +14,7 @@ namespace TryGet.Tests
         private interface IThrowOnInitModule : IModule { }
         private interface IThrowOnShutdownModule : IModule { }
         private interface INullDepsModule : IModule { }
+        private interface IMissingDependencyModule : IModule { }
 
         private class GoodModule : IGoodModule
         {
@@ -31,6 +32,14 @@ namespace TryGet.Tests
             public int Priority => 10;
             public IReadOnlyList<Type> DependsOn => new[] { typeof(IGoodModule) };
             public void OnInit(IModuleSystem host) { throw new InvalidOperationException("boom"); }
+            public void Shutdown() { }
+        }
+
+        private class MissingDependencyModule : IMissingDependencyModule
+        {
+            public int Priority => 10;
+            public IReadOnlyList<Type> DependsOn => new[] { typeof(INullDepsModule) };
+            public void OnInit(IModuleSystem host) { }
             public void Shutdown() { }
         }
 
@@ -128,6 +137,20 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void Initialize_UnregisteredDependency_FailsBeforeAnyModuleIsInitialized()
+        {
+            var host = new ModuleSystem();
+            var good = new GoodModule();
+            host.Register<IGoodModule>(good);
+            host.Register<IMissingDependencyModule>(new MissingDependencyModule());
+
+            Assert.Throws<ModuleDependencyMissingException>(() => host.Initialize());
+
+            Assert.IsFalse(good.InitCalled);
+            Assert.IsFalse(host.IsInitialized);
+        }
+
+        [Test]
         public void Initialize_CircularDependency_ThrowsTypedException()
         {
             var host = new ModuleSystem();
@@ -136,6 +159,21 @@ namespace TryGet.Tests
 
             var ex = Assert.Throws<ModuleCircularDependencyException>(() => host.Initialize());
             Assert.AreEqual(2, ex.InvolvedModules.Count);
+        }
+
+        [Test]
+        public void Initialize_CircularDependency_FailsBeforeAnyModuleIsInitialized()
+        {
+            var host = new ModuleSystem();
+            var good = new GoodModule();
+            host.Register<IGoodModule>(new CircularA());
+            host.Register<IThrowOnInitModule>(new CircularB());
+            host.Register<IMissingDependencyModule>(new DependsOnGoodModule(good));
+
+            Assert.Throws<ModuleCircularDependencyException>(() => host.Initialize());
+
+            Assert.IsFalse(good.InitCalled);
+            Assert.IsFalse(host.IsInitialized);
         }
 
         private class CircularA : IGoodModule
@@ -152,6 +190,16 @@ namespace TryGet.Tests
             public IReadOnlyList<Type> DependsOn => new[] { typeof(IGoodModule) };
             public void OnInit(IModuleSystem host) { }
             public void Shutdown() { }
+        }
+
+        private class DependsOnGoodModule : IMissingDependencyModule
+        {
+            private readonly GoodModule _inner;
+            public DependsOnGoodModule(GoodModule inner) { _inner = inner; }
+            public int Priority => 0;
+            public IReadOnlyList<Type> DependsOn => new[] { typeof(IGoodModule) };
+            public void OnInit(IModuleSystem host) { _inner.OnInit(host); }
+            public void Shutdown() { _inner.Shutdown(); }
         }
 
         [Test]

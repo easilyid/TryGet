@@ -251,5 +251,34 @@ namespace TryGet.Tests
 
             host.Shutdown();
         }
+
+        [Test]
+        public void SubscribeWithDisposedScope_DuringPublish_DoesNotLeaveHandlerAfterFlush()
+        {
+            var host = new ModuleSystem();
+            host.Initialize();
+
+            int lateCallCount = 0;
+            var scope = host.EventModule.CreateScope();
+            scope.Dispose();
+
+            void LateHandler(TestEvent evt)
+            {
+                lateCallCount++;
+            }
+
+            host.EventModule.Subscribe<TestEvent>(_ =>
+            {
+                host.EventModule.Subscribe<TestEvent>(LateHandler, scope);
+            });
+
+            host.EventModule.Publish(new TestEvent());
+            host.EventModule.Publish(new TestEvent());
+
+            Assert.AreEqual(0, lateCallCount, "已 Dispose 的 scope 在派发中订阅也不应在 flush 后残留 handler");
+            Assert.AreEqual(1, host.EventModule.GetSubscriberCount<TestEvent>());
+
+            host.Shutdown();
+        }
     }
 }

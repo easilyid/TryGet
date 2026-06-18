@@ -136,5 +136,31 @@ namespace TryGet.Tests
             Assert.AreEqual(2, hits, "补偿期间自取消应立即停止后续补偿");
             Assert.AreEqual(0, t.PendingCount, "自取消后周期 timer 被移除");
         }
+
+        [Test]
+        public void ScheduleRepeat_PauseSelfDuringCatchUp_FreezesImmediately()
+        {
+            var t = new TimerModule();
+            int hits = 0;
+            TimerHandle h = default;
+            h = t.ScheduleRepeat(1f, () =>
+            {
+                hits++;
+                if (hits == 2) t.Pause(h);
+            }, maxCatchUp: int.MaxValue);
+
+            t.Update(5f, 5f);
+
+            Assert.AreEqual(2, hits, "补偿期间自暂停应立即停止后续补偿");
+            Assert.IsTrue(t.IsPaused(h), "补偿 callback 内自暂停应保持生效，不被当前 Update 的旧快照覆盖");
+            Assert.AreEqual(1, t.PendingCount);
+
+            t.Update(10f, 10f);
+            Assert.AreEqual(2, hits, "暂停期间不应继续触发");
+
+            t.Resume(h);
+            t.Update(1f, 1f);
+            Assert.AreEqual(3, hits, "Resume 后恢复下一周期触发");
+        }
     }
 }

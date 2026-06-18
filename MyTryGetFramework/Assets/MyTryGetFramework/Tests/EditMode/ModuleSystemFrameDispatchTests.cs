@@ -209,6 +209,21 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void FrameDispatch_AfterShutdownFailure_ThrowsAndDoesNotDispatch()
+        {
+            var host = new ModuleSystem();
+            var renderer = new ThrowingShutdownRendererModule();
+            host.Register<IRendererModule>(renderer);
+            host.Initialize();
+
+            Assert.Throws<ModuleShutdownException>(() => host.Shutdown());
+
+            Assert.Throws<InvalidOperationException>(() => host.Update(0.016f, 0.016f));
+            Assert.AreEqual(0, renderer.UpdateCount);
+            Assert.IsFalse(host.IsInitialized);
+        }
+
+        [Test]
         public void Update_OrderMatchesInitOrder()
         {
             // 用 DependsOn 强制拓扑顺序：Camera 依赖 Renderer，验证 LateUpdate 序与拓扑序一致。
@@ -259,6 +274,19 @@ namespace TryGet.Tests
             host.Update(0.016f, 0.016f);
 
             Assert.AreEqual(3, renderer.UpdateCount);
+        }
+
+        private sealed class ThrowingShutdownRendererModule : IRendererModule, IUpdateModule
+        {
+            public int Priority => 0;
+            public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
+            public int UpdateCount { get; private set; }
+            public void OnInit(IModuleSystem host) { }
+            public void Update(float dt, float unscaledDt) { UpdateCount++; }
+            public void Shutdown()
+            {
+                throw new InvalidOperationException("shutdown failed");
+            }
         }
     }
 }

@@ -5,6 +5,10 @@ namespace TryGet
 {
     /// <summary>
     /// V0.6 Iter 6：为 <see cref="ITimerModule"/> 提供 TGTask 集成的扩展方法。
+    /// 这些扩展保持 TimerModule 的 callback-oriented 语义：timer callback 触发时完成 TGTask。
+    /// 它们不提供 <see cref="TGCancelToken"/> overload；需要 owner-scope cancellation、phase-aware
+    /// scheduling 或 Shutdown cancellation 的 await-oriented 延迟，请使用 <see cref="ITGTaskScheduler"/>
+    /// 的 <c>Delay</c> / <c>Yield</c> / <c>WaitForFrames</c> token overload。
     ///
     /// 命名空间故意放在 <c>TryGet</c>（与 ITimerModule 一致），让业务 <c>using TryGet;</c>
     /// 即可同时获得 timer 接口和 await 扩展，不必再加 <c>using TryGet.Async;</c>。
@@ -13,6 +17,8 @@ namespace TryGet
     {
         /// <summary>
         /// 把延迟 N 秒后触发的回调包装成可 await 的 TGTask（使用 scaled deltaTime）。
+        /// 此方法不接受 <see cref="TGCancelToken"/>，以避免 TimerModule 与 TGTaskScheduler
+        /// 形成两套可取消 delay 模型；可取消 await 延迟使用 <see cref="ITGTaskScheduler.Delay(float, TGCancelToken)"/>。
         ///
         /// 实现：内部用池化的 <see cref="TGTaskCompletionSource"/>，timer 触发时 SetResult 并回收 tcs；
         /// body 由 await 路径的 GetResult 在消费侧自动归还池（V2.0 C11）。
@@ -34,6 +40,8 @@ namespace TryGet
 
         /// <summary>
         /// 同 <see cref="WaitAsync"/> 但使用 unscaled deltaTime（不受 timeScale 影响）。
+        /// 此方法同样不接受 <see cref="TGCancelToken"/>；可取消 unscaled await 延迟使用
+        /// <see cref="ITGTaskScheduler.Delay(float, FramePhase, TimeMode, TGCancelToken)"/>。
         /// </summary>
         public static TGTask WaitUnscaledAsync(this ITimerModule timer, float seconds)
         {

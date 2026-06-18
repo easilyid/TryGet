@@ -233,6 +233,8 @@ namespace TryGet
                             }
                             if (entry.Paused)
                             {
+                                if (entry.RemainingSeconds <= 0f)
+                                    entry.RemainingSeconds = entry.Interval;
                                 _entries[i] = entry;
                                 selfInterrupted = true;
                                 break;

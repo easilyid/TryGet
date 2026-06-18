@@ -246,6 +246,26 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void Forget_TokenCanceledTask_NoUnobserved()
+        {
+            var sched = new TGTaskScheduler();
+            var src = TGCancelSource.Rent();
+            Exception unobserved = null;
+            Action<Exception> h = ex => unobserved = ex;
+            TGTaskScheduler.UnobservedException += h;
+            try
+            {
+                var task = sched.Delay(100f, src.Token);
+                task.Forget();
+
+                src.Cancel();
+
+                Assert.IsNull(unobserved, "TGCancelToken 触发的预期取消不应进入 UnobservedException");
+            }
+            finally { TGTaskScheduler.UnobservedException -= h; }
+        }
+
+        [Test]
         public void Forget_FaultedTask_StillRaisesUnobserved()
         {
             Exception unobserved = null;
@@ -409,6 +429,27 @@ namespace TryGet.Tests
             Run().Forget();
             sched.Update(1f, 1f); // Faulting 先完成并抛异常
             Assert.IsTrue(caught, "WhenAny 首个完成抛异常 → 传播该异常");
+        }
+
+        [Test]
+        public void WhenAny_LosingBranches_AreConsumedWhenTheyComplete()
+        {
+            TGTaskPool.ClearAll();
+            TGTaskCompletionSource.ClearSourcePool();
+
+            var sched = new TGTaskScheduler();
+            var first = sched.Delay(0.5f);
+            var losing = sched.Delay(1.0f);
+            var any = TGTask.WhenAny(first, losing);
+
+            sched.Update(0.5f, 0.5f);
+            Assert.AreEqual(0, any.GetAwaiter().GetResult());
+            int pooledAfterWinner = TGTaskPool.PooledCount;
+
+            sched.Update(0.5f, 0.5f);
+
+            Assert.Greater(TGTaskPool.PooledCount, pooledAfterWinner,
+                "WhenAny 已有胜者后，后完成的 losing branch 仍应被 GetResult 消费并归还 body");
         }
 
         [Test]

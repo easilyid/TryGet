@@ -135,6 +135,27 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void Shutdown_ClearsQueuesAndResetsDiagnostics()
+        {
+            var scheduler = new TGTaskScheduler();
+            scheduler.Yield();
+            scheduler.Delay(5f);
+            scheduler.WaitForFrames(10);
+
+            scheduler.Update(1f, 1f);
+            Assert.Greater(scheduler.FrameCount, 0);
+            Assert.Greater(scheduler.ElapsedTime, 0f);
+
+            scheduler.Shutdown();
+
+            Assert.AreEqual(0, scheduler.PendingYieldCount);
+            Assert.AreEqual(0, scheduler.PendingDelayCount);
+            Assert.AreEqual(0, scheduler.PendingFrameWaitCount);
+            Assert.AreEqual(0, scheduler.FrameCount);
+            Assert.AreEqual(0f, scheduler.ElapsedTime);
+        }
+
+        [Test]
         public void AsyncTGTask_AwaitingDelay_ResumesAfterUpdate()
         {
             var scheduler = new TGTaskScheduler();
@@ -529,4 +550,3 @@ namespace TryGet.Tests
         }
     }
 }
-
