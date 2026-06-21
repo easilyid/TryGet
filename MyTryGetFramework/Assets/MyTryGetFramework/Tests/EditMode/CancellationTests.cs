@@ -52,6 +52,40 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void Cancel_CallbackThrows_OthersStillInvoked()
+        {
+            var s = TGCancelSource.Rent();
+            int c = 0;
+            s.Token.Register(() => c++);
+            s.Token.Register(() => throw new InvalidOperationException("boom"));
+
+            Assert.DoesNotThrow(() => s.Cancel());
+            Assert.AreEqual(1, c, "单个取消回调异常不应阻断其余回调");
+        }
+
+        [Test]
+        public void Cancel_RegisterInsideCallback_InvokesImmediately()
+        {
+            var s = TGCancelSource.Rent();
+            bool innerCalled = false;
+            s.Token.Register(() => s.Token.Register(() => innerCalled = true));
+
+            s.Cancel();
+
+            Assert.IsTrue(innerCalled, "取消回调内再次 Register 时，因 token 已取消应立即同步触发");
+        }
+
+        [Test]
+        public void Cancel_DisposeOtherRegistrationInsideCallback_DoesNotCrash()
+        {
+            var s = TGCancelSource.Rent();
+            var other = s.Token.Register(() => { });
+            s.Token.Register(() => other.Dispose());
+
+            Assert.DoesNotThrow(() => s.Cancel(), "取消回调内注销其他 registration 不应破坏 Cancel 遍历");
+        }
+
+        [Test]
         public void Registration_Dispose_RemovesCallback()
         {
             var s = TGCancelSource.Rent();
@@ -150,6 +184,48 @@ namespace TryGet.Tests
             sched.Update(1f, 1f);
             s.Cancel();
             Assert.IsTrue(caught, "取消 pending WaitForFrames → await 抛 OCE");
+        }
+
+        [Test]
+        public void Yield_PhaseToken_CancelWhilePending_Cancels()
+        {
+            var sched = new TGTaskScheduler();
+            var s = TGCancelSource.Rent();
+            var task = sched.Yield(FramePhase.LateUpdate, s.Token);
+
+            s.Cancel();
+
+            Assert.Throws<OperationCanceledException>(() => task.GetAwaiter().GetResult());
+            Assert.DoesNotThrow(() => sched.LateUpdate(0.016f, 0.016f),
+                "取消后再驱动目标 phase 应只清理队列，不应崩溃");
+        }
+
+        [Test]
+        public void Delay_PhaseTimeModeToken_CancelWhilePending_Cancels()
+        {
+            var sched = new TGTaskScheduler();
+            var s = TGCancelSource.Rent();
+            var task = sched.Delay(5f, FramePhase.FixedUpdate, TimeMode.Unscaled, s.Token);
+
+            s.Cancel();
+
+            Assert.Throws<OperationCanceledException>(() => task.GetAwaiter().GetResult());
+            Assert.DoesNotThrow(() => sched.FixedUpdate(0.016f, 0.016f),
+                "取消后的 full overload Delay entry 应可被目标 phase 清理");
+        }
+
+        [Test]
+        public void WaitForFrames_PhaseToken_CancelWhilePending_Cancels()
+        {
+            var sched = new TGTaskScheduler();
+            var s = TGCancelSource.Rent();
+            var task = sched.WaitForFrames(3, FramePhase.EndOfFrame, s.Token);
+
+            s.Cancel();
+
+            Assert.Throws<OperationCanceledException>(() => task.GetAwaiter().GetResult());
+            Assert.DoesNotThrow(() => sched.EndOfFrame(0.016f, 0.016f),
+                "取消后的 phase-aware WaitForFrames entry 应可被目标 phase 清理");
         }
 
         [Test]
@@ -373,6 +449,18 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void WhenAny_NullArray_ThrowsArgument()
+        {
+            Assert.Throws<ArgumentException>(() => TGTask.WhenAny((TGTask[])null));
+        }
+
+        [Test]
+        public void WhenAny_EmptyArray_ThrowsArgument()
+        {
+            Assert.Throws<ArgumentException>(() => TGTask.WhenAny());
+        }
+
+        [Test]
         public void WhenAll_Empty_CompletesImmediately()
         {
             var t = TGTask.WhenAll();
@@ -392,6 +480,44 @@ namespace TryGet.Tests
             Assert.IsFalse(cancelled, "超时前不取消");
             sched.Update(1f, 1f);
             Assert.IsTrue(cancelled, "CancelAfter 到时取消 pending");
+        }
+
+        [Test]
+        public void CancelAfter_RecycledBeforeTimeout_DoesNotCancelReusedSource()
+        {
+            var sched = new TGTaskScheduler();
+            var src = TGCancelSource.Rent();
+
+            try
+            {
+                src.CancelAfter(1f, sched);
+                src.Recycle();
+
+                var reused = TGCancelSource.Rent();
+                Assert.AreSame(src, reused, "测试依赖 source 池复用同一对象以验证 version 守卫");
+
+                var task = sched.Delay(2f, reused.Token);
+
+                sched.Update(1f, 1f);
+
+                Assert.IsFalse(reused.IsCancellationRequested,
+                    "旧世代 CancelAfter 到时后不应误取消已复用的新 source");
+                Assert.IsFalse(task.IsCompleted,
+                    "绑定新 token 的 pending task 不应被旧世代 timeout 取消");
+
+                sched.Update(1f, 1f);
+
+                Assert.IsTrue(task.IsCompleted);
+                Assert.DoesNotThrow(() => task.GetAwaiter().GetResult());
+
+                reused.Recycle();
+                src = null;
+            }
+            finally
+            {
+                src?.Recycle();
+                sched.Shutdown();
+            }
         }
 
         // ========== 边界补充（覆盖缺口） ==========

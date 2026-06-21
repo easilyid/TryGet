@@ -901,7 +901,7 @@ TryGet `IObjectPool` 仅暴露 `IdleCount`（`IObjectPool.cs:22-25`），重复 
 
 **来源参考**：AlicizaX UIMetaSourceGenerator 的 `ReportDiagnostic`。
 
-> 实施记录：诊断 TG0001-TG0006 落地于生成器工程 `src/Diagnostics/GeneratorDiagnostics.cs`；同迭代把生成器从「孤立 dll」确立为「源码工程一等公民」（专属 sln + GeneratorDriver 测试工程 + 一键构建脚本 + 文档），并修复了被 dll 黑盒掩盖的 `AssemblyManifestRegistry`→`ModuleRegistry` 命名漂移 bug。生成器单测 12/12、Unity EditMode 368/368 全绿。生成器源码随后已迁入框架内 `MyTryGetFramework/Assets/MyTryGetFramework/Generators~/`（对标 Unity Netcode Source~），工作流见 `CLAUDE.md` 与 `Generators~/README.md`。C12（框架契约 Analyzer）可在此基建上续作。
+> 实施记录：诊断 TG0001-TG0006 落地于生成器工程 `src/Diagnostics/GeneratorDiagnostics.cs`；同迭代把生成器从「孤立 dll」确立为「源码工程一等公民」（专属 sln + GeneratorDriver 测试工程 + 一键构建脚本 + 文档），并修复了被 dll 黑盒掩盖的 `AssemblyManifestRegistry`→`ModuleRegistry` 命名漂移 bug。生成器单测 12/12、Unity EditMode 368/368 全绿。生成器源码随后已迁入框架内 `MyTryGetFramework/Assets/MyTryGetFramework/Generators~/`（对标 Unity Netcode Source~），工作流见 `AGENTS.md` 与 `Generators~/README.md`。C12（框架契约 Analyzer）可在此基建上续作。
 
 **必要性**：
 

@@ -8,7 +8,7 @@
 
     设计要点（详见 docs/design/V0.9.5-source-generator.md）：
     - 用 IIncrementalGenerator（不是已 deprecated 的 ISourceGenerator）
-    - netstandard2.0 — Unity / Roslyn 4.0 标配
+    - netstandard2.0 — Unity / Roslyn 4.3 标配
     - 不引用 UnityEngine / Microsoft.Extensions.* — Generator 跑在 Roslyn host 内
     - DLL 输出后手动 copy 到 MyTryGetFramework/Assets/MyTryGetFramework/Runtime/Core/Generators/
       并加 Unity Inspector 上的 "RoslynAnalyzer" label（DLL.meta 中 PluginImporter）
@@ -39,7 +39,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.1" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

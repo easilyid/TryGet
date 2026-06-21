@@ -122,7 +122,14 @@ namespace TryGet
                         "This indicates a double-release bug.");
 #endif
 
-                _onReturn?.Invoke(item);
+                try
+                {
+                    _onReturn?.Invoke(item);
+                }
+                catch (Exception)
+                {
+                    // onReturn is a cleanup hook; isolate failures so ownership accounting cannot leak.
+                }
                 _idle.Push(item);
                 _totalReturned++;
             }

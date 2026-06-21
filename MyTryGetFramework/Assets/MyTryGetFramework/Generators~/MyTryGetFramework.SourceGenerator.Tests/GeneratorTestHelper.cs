@@ -23,6 +23,7 @@ namespace TryGet.SourceGenerator.Tests
         /// </summary>
         public const string TryGetStub = @"
 using System;
+using System.Collections.Generic;
 namespace TryGet
 {
     public interface IModule {}
@@ -32,14 +33,51 @@ namespace TryGet
     public sealed class ModuleAttribute : Attribute { public ModuleAttribute(Type serviceType) {} }
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
     public sealed class EventHandlerAttribute : Attribute {}
+    public readonly struct ModuleRegistrationInfo {
+        public Type ImplementationType { get; }
+        public Type ServiceType { get; }
+        public string SourceAssembly { get; }
+        public ModuleRegistrationInfo(Type implementationType, Type serviceType, string sourceAssembly) {
+            ImplementationType = implementationType;
+            ServiceType = serviceType;
+            SourceAssembly = sourceAssembly;
+        }
+    }
+    public readonly struct EventHandlerRegistrationInfo {
+        public string HandlerSignature { get; }
+        public Type EventType { get; }
+        public string SourceAssembly { get; }
+        public EventHandlerRegistrationInfo(string handlerSignature, Type eventType, string sourceAssembly) {
+            HandlerSignature = handlerSignature;
+            EventType = eventType;
+            SourceAssembly = sourceAssembly;
+        }
+    }
     public static class ModuleRegistry {
         public static void RegisterWithMetadata(Type implType, Type serviceType, string asm) {}
         public static void Register(Action<IModuleSystem> registration) {}
+        public static IReadOnlyList<ModuleRegistrationInfo> Snapshot() { return Array.Empty<ModuleRegistrationInfo>(); }
     }
     public static class EventHandlerRegistry {
         public static void RegisterWithMetadata(string sig, Type eventType, string asm) {}
         public static void Register(Action<IEventModule> registration) {}
+        public static IReadOnlyList<EventHandlerRegistrationInfo> Snapshot() { return Array.Empty<EventHandlerRegistrationInfo>(); }
     }
+}";
+
+        private const string UnityStub = @"
+using System;
+namespace UnityEngine
+{
+    public enum RuntimeInitializeLoadType { BeforeSceneLoad }
+    public sealed class RuntimeInitializeOnLoadMethodAttribute : Attribute
+    {
+        public RuntimeInitializeOnLoadMethodAttribute(RuntimeInitializeLoadType loadType) {}
+    }
+}
+namespace UnityEngine.Scripting
+{
+    public sealed class PreserveAttribute : Attribute {}
 }";
 
         public sealed class Result
@@ -57,12 +95,14 @@ namespace TryGet
                 GeneratorDiagnostics.Count(d => d.Id == id);
         }
 
-        public static Result Run(IIncrementalGenerator generator, string userSource)
+        public static Result Run(IIncrementalGenerator generator, string userSource, params string[] preprocessorSymbols)
         {
-            var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+            var parseOptions = new CSharpParseOptions(LanguageVersion.Latest)
+                .WithPreprocessorSymbols(preprocessorSymbols);
             var trees = new[]
             {
                 CSharpSyntaxTree.ParseText(TryGetStub, parseOptions),
+                CSharpSyntaxTree.ParseText(UnityStub, parseOptions),
                 CSharpSyntaxTree.ParseText(userSource, parseOptions),
             };
 

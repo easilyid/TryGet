@@ -524,6 +524,133 @@ namespace TryGet.Tests
             Assert.AreEqual(4, scheduler.FrameCount);
         }
 
+        [Test]
+        public void FrameBoundary_FixedOnlyThenEarlyOnly_TreatedAsSameFrameWithoutExplicitFrameStart()
+        {
+            var scheduler = new TGTaskScheduler();
+
+            scheduler.FixedUpdate(0.02f, 0.02f);
+
+            Assert.AreEqual(1, scheduler.FrameCount);
+            Assert.AreEqual(0f, scheduler.ElapsedTime, 0.0001f);
+
+            scheduler.EarlyUpdate(0.03f, 0.03f);
+
+            Assert.AreEqual(1, scheduler.FrameCount,
+                "FixedUpdate -> EarlyUpdate is indistinguishable from Unity's same-frame Fixed-before-Update order without an explicit frame-start signal.");
+            Assert.AreEqual(0.03f, scheduler.ElapsedTime, 0.0001f);
+        }
+
+        [Test]
+        public void Delay_FixedUpdate_UsesFixedTimeAxis_NotUpdateTimeAxis()
+        {
+            var scheduler = new TGTaskScheduler();
+            var task = scheduler.Delay(0.03f, FramePhase.FixedUpdate);
+
+            scheduler.EarlyUpdate(0.1f, 0.1f);
+            scheduler.Update(0.1f, 0.1f);
+            Assert.IsFalse(task.IsCompleted, "FixedUpdate delay must not complete from Update/EarlyUpdate elapsed time.");
+
+            scheduler.FixedUpdate(0.01f, 0.01f);
+            Assert.IsFalse(task.IsCompleted);
+
+            scheduler.FixedUpdate(0.01f, 0.01f);
+            Assert.IsFalse(task.IsCompleted);
+
+            scheduler.FixedUpdate(0.01f, 0.01f);
+            Assert.IsTrue(task.IsCompleted);
+        }
+
+        [Test]
+        public void Delay_MultipleFixedUpdateInOneFrame_AccumulatesFixedTimeWithoutMultipleFrameCount()
+        {
+            var scheduler = new TGTaskScheduler();
+            var task = scheduler.Delay(0.05f, FramePhase.FixedUpdate);
+
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            Assert.IsFalse(task.IsCompleted);
+            Assert.AreEqual(1, scheduler.FrameCount);
+
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            Assert.IsFalse(task.IsCompleted);
+            Assert.AreEqual(1, scheduler.FrameCount,
+                "Multiple FixedUpdate calls before the next render/update phase are still one Unity frame.");
+
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            Assert.IsTrue(task.IsCompleted);
+            Assert.AreEqual(1, scheduler.FrameCount,
+                "Fixed time should accumulate for every FixedUpdate, but frame count should not.");
+        }
+
+        [Test]
+        public void Delay_UnityFixedBeforeEarly_DoesNotAccumulateTwiceInOneFrame()
+        {
+            var scheduler = new TGTaskScheduler();
+            var task = scheduler.Delay(0.04f);
+
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            Assert.IsFalse(task.IsCompleted);
+            Assert.AreEqual(0f, scheduler.ElapsedTime, 0.0001f);
+
+            scheduler.EarlyUpdate(0.02f, 0.02f);
+            scheduler.Update(0.02f, 0.02f);
+            Assert.IsFalse(task.IsCompleted, "Fixed -> Early -> Update in one Unity frame should only accumulate one frame of time.");
+            Assert.AreEqual(0.02f, scheduler.ElapsedTime, 0.0001f);
+
+            scheduler.EndOfFrame(0.02f, 0.02f);
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            scheduler.EarlyUpdate(0.02f, 0.02f);
+            scheduler.Update(0.02f, 0.02f);
+
+            Assert.IsTrue(task.IsCompleted);
+            Assert.AreEqual(0.04f, scheduler.ElapsedTime, 0.0001f);
+        }
+
+        [Test]
+        public void Delay_UnityFixedEndBeforeEarly_DoesNotAccumulateTwiceInOneFrame()
+        {
+            var scheduler = new TGTaskScheduler();
+            var task = scheduler.Delay(0.04f);
+
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            scheduler.EndOfFrame(0.02f, 0.02f);
+            scheduler.EarlyUpdate(0.02f, 0.02f);
+            scheduler.Update(0.02f, 0.02f);
+
+            Assert.IsFalse(task.IsCompleted, "Fixed -> EndOfFrame -> Early in one Unity-driven frame should only accumulate one frame of time.");
+            Assert.AreEqual(0.02f, scheduler.ElapsedTime, 0.0001f);
+
+            scheduler.EndOfFrame(0.02f, 0.02f);
+            scheduler.FixedUpdate(0.02f, 0.02f);
+            scheduler.EndOfFrame(0.02f, 0.02f);
+            scheduler.EarlyUpdate(0.02f, 0.02f);
+            scheduler.Update(0.02f, 0.02f);
+
+            Assert.IsTrue(task.IsCompleted);
+            Assert.AreEqual(0.04f, scheduler.ElapsedTime, 0.0001f);
+        }
+
+        [Test]
+        public void Delay_UnityEndBeforeLate_DoesNotAccumulateTwiceInOneFrame()
+        {
+            var scheduler = new TGTaskScheduler();
+            var task = scheduler.Delay(0.04f);
+
+            scheduler.EarlyUpdate(0.02f, 0.02f);
+            scheduler.Update(0.02f, 0.02f);
+            scheduler.EndOfFrame(0.02f, 0.02f);
+            scheduler.LateUpdate(0.02f, 0.02f);
+
+            Assert.IsFalse(task.IsCompleted, "Early -> Update -> EndOfFrame -> Late in one Unity-driven frame should only accumulate one frame of time.");
+            Assert.AreEqual(0.02f, scheduler.ElapsedTime, 0.0001f);
+
+            scheduler.EarlyUpdate(0.02f, 0.02f);
+            scheduler.Update(0.02f, 0.02f);
+
+            Assert.IsTrue(task.IsCompleted);
+            Assert.AreEqual(0.04f, scheduler.ElapsedTime, 0.0001f);
+        }
+
         // ---- Phase-aware async helpers ----
         private static async TGTask AsyncYieldPhase(ITGTaskScheduler scheduler, FramePhase phase, Action onReached)
         {

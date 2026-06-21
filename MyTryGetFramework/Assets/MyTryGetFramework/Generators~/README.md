@@ -38,7 +38,8 @@ MyTryGetFramework/Assets/MyTryGetFramework/
    │  └─ src/
    │     ├─ Generators/ModuleManifestGenerator.cs   # [Module] → ModuleRegistry 注册
    │     ├─ Generators/EventHandlerGenerator.cs     # [EventHandler] → EventHandlerRegistry 订阅
-   │     └─ Diagnostics/GeneratorDiagnostics.cs     # TG0001-TG0006 编译期诊断（C10）
+   │     ├─ Generators/ModuleInitializerSupportGenerator.cs # ModuleInitializerAttribute polyfill
+   │     └─ Diagnostics/GeneratorDiagnostics.cs     # TG0001-TG0007 编译期诊断（C10）
    └─ MyTryGetFramework.SourceGenerator.Tests/      # GeneratorDriver 单元测试（net8.0）
 ```
 
@@ -67,6 +68,15 @@ dotnet test "MyTryGetFramework/Assets/MyTryGetFramework/Generators~/MyTryGetFram
 
 > 历史教训：V2.0「收敛模块系统命名」把运行时 `AssemblyManifestRegistry` 改名为 `ModuleRegistry`，但漏改了生成器源码，且因为没人重建 dll，错误被掩盖了很久（Unity 用旧 dll 生成正确名字；git 源码却生成已不存在的类）。现在有了测试工程 + 构建脚本，这类漂移会被 `BaselineGenerationTests` 立即捕获。
 
+## Unity 初始化触发
+
+生成的 manifest `Initialize()` 采用双触发：
+
+- `[ModuleInitializer]`：程序集加载时注册，覆盖 Unity Test Runner 中测试程序集不稳定触发 `RuntimeInitializeOnLoadMethod` 的场景。
+- `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]`：Unity 运行时入口兜底，并通过 `_initialized` 防重复注册。
+
+`ModuleInitializerSupportGenerator` 会为缺少内置 `ModuleInitializerAttribute` 的目标框架生成 polyfill，保持 Unity / netstandard 目标可编译。
+
 ## 编译期诊断（C10）
 
 非法的 `[Module]` / `[EventHandler]` 用法不再被静默丢弃，而是报编译错误（带源码位置）：
@@ -79,3 +89,4 @@ dotnet test "MyTryGetFramework/Assets/MyTryGetFramework/Generators~/MyTryGetFram
 | TG0004 | `[EventHandler]` 方法不是 static |
 | TG0005 | `[EventHandler]` 方法签名不是 `void M(TEvent evt)` |
 | TG0006 | `[EventHandler]` 事件参数不是 struct |
+| TG0007 | `[Module]` 标记的类没有 public 无参构造器 |

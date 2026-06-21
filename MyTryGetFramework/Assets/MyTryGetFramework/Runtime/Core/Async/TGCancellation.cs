@@ -8,7 +8,9 @@ namespace TryGet.Async
     /// 但单线程、零锁、无 class 分配。<c>default</c> = <see cref="None"/>（永不取消，不持 <see cref="TGCancelSource"/>）。
     ///
     /// 设计见 ADR-0021（D1 自研、D2 token 式、D6 version 守卫、D9 命名）。取消语义为异常型：
-    /// 触发后绑定的 pending <see cref="TGTask"/> 以 <see cref="TGTaskAbortException"/> 完成。
+    /// 触发后绑定的 pending <see cref="TGTask"/> 以 <see cref="OperationCanceledException"/> 完成
+    /// （<see cref="ThrowIfCancellationRequested"/> 与 <c>TGTask.Abort()</c> 抛其子类 <see cref="TGTaskAbortException"/>）；
+    /// 消费方统一 <c>catch (OperationCanceledException)</c> 即可覆盖全部取消路径。
     /// </summary>
     public readonly struct TGCancelToken
     {

@@ -226,6 +226,87 @@ namespace TryGet.Tests
             });
         }
 
+        // ---------- ProcedureBase CancelScope integration ----------
+
+        [Test]
+        public void Pop_AsyncExit_TriggersCancelScope_AfterOnExitAsyncCompletes()
+        {
+            var (host, module) = NewHostWithScheduler();
+            var under = new TrackingProc();
+            var exitTcs = new TGTaskCompletionSource();
+            var top = new ScopedAsyncProc(exitTcs: exitTcs);
+            module.AddProcedure("under", under);
+            module.AddProcedure("top", top);
+            module.Start("under").GetAwaiter().GetResult();
+            module.Push("top").GetAwaiter().GetResult();
+
+            var transition = module.Pop();
+
+            Assert.IsFalse(transition.IsCompleted);
+            Assert.IsFalse(top.Cancelled, "OnExitAsync 未完成前还没有执行 OnExit/CancelScope");
+            Assert.IsFalse(top.ExitCalled);
+
+            exitTcs.SetResult();
+            exitTcs.Return();
+
+            Assert.IsTrue(transition.IsCompleted);
+            Assert.DoesNotThrow(() => transition.GetAwaiter().GetResult());
+            Assert.IsTrue(top.ExitCalled, "OnExitAsync 完成后应执行同步 OnExit");
+            Assert.IsTrue(top.Cancelled, "OnExit 调用 base.OnExit 后应取消 Procedure scope");
+            Assert.AreEqual("under", module.CurrentProcedure);
+
+            host.Shutdown();
+        }
+
+        [Test]
+        public void Stop_AsyncProcedure_TriggersOnExitAsync_ThenCancelScope()
+        {
+            var (host, module) = NewHostWithScheduler();
+            var exitTcs = new TGTaskCompletionSource();
+            var proc = new ScopedAsyncProc(exitTcs: exitTcs);
+            module.AddProcedure("p1", proc);
+            module.Start("p1").GetAwaiter().GetResult();
+
+            module.Stop();
+
+            Assert.IsTrue(module.IsExiting);
+            Assert.IsFalse(proc.Cancelled, "Stop 的异步退出未完成前不应提前 CancelScope");
+            Assert.IsFalse(proc.ExitCalled);
+
+            exitTcs.SetResult();
+            exitTcs.Return();
+
+            Assert.IsFalse(module.IsExiting);
+            Assert.IsTrue(proc.ExitCalled);
+            Assert.IsTrue(proc.Cancelled);
+            Assert.IsFalse(module.IsRunning);
+
+            host.Shutdown();
+        }
+
+        [Test]
+        public void Shutdown_AsyncProcedure_PendingEnter_CancelsTransitionAndScopeWithoutExitAsync()
+        {
+            var (host, module) = NewHostWithScheduler();
+            var enterTcs = new TGTaskCompletionSource();
+            var proc = new ScopedAsyncProc(enterTcs: enterTcs);
+            module.AddProcedure("p1", proc);
+
+            var transition = module.Start("p1");
+            Assert.IsFalse(transition.IsCompleted);
+            Assert.IsTrue(module.IsEntering);
+
+            host.Shutdown();
+
+            Assert.IsTrue(transition.IsCompleted, "Shutdown 应取消 pending enter transition，避免 await 永久挂起");
+            Assert.Throws<OperationCanceledException>(() => transition.GetAwaiter().GetResult());
+            Assert.IsTrue(proc.ExitCalled, "Shutdown 路径应执行同步 OnExit 清理已入栈 Procedure");
+            Assert.AreEqual(0, proc.ExitAsyncCount, "Shutdown 不等待/调用 OnExitAsync，契约应被测试固定");
+            Assert.IsTrue(proc.Cancelled, "同步 OnExit 应触发 ProcedureBase.CancelScope");
+
+            enterTcs.Return();
+        }
+
         // ---------- helpers ----------
 
         private static ProcedureModule NewModule(out ProcedureModule m)
@@ -233,6 +314,16 @@ namespace TryGet.Tests
             m = new ProcedureModule();
             m.OnInit(null);
             return m;
+        }
+
+        private static (ModuleSystem host, ProcedureModule module) NewHostWithScheduler()
+        {
+            var host = new ModuleSystem();
+            var module = new ProcedureModule();
+            host.Register<ITGTaskScheduler>(new TGTaskScheduler());
+            host.Register<IProcedureModule>(module);
+            host.Initialize();
+            return (host, module);
         }
 
         private sealed class TrackingProc : ProcedureBase
@@ -259,6 +350,47 @@ namespace TryGet.Tests
 
             public override TGTask OnExitAsync(IProcedureModule module)
                 => _exitTcs?.Task ?? TGTask.CompletedTask;
+        }
+
+        private sealed class ScopedAsyncProc : AsyncProcedureBase
+        {
+            private readonly TGTaskCompletionSource _enterTcs;
+            private readonly TGTaskCompletionSource _exitTcs;
+            public bool Cancelled;
+            public bool ExitCalled;
+            public int ExitAsyncCount;
+
+            public ScopedAsyncProc(TGTaskCompletionSource enterTcs = null, TGTaskCompletionSource exitTcs = null)
+            {
+                _enterTcs = enterTcs;
+                _exitTcs = exitTcs;
+            }
+
+            public override void OnEnter(IProcedureModule module)
+            {
+                RunUntilCancelled(module.Host.Get<ITGTaskScheduler>()).Forget();
+            }
+
+            private async TGTask RunUntilCancelled(ITGTaskScheduler scheduler)
+            {
+                try { await scheduler.Delay(100f, CancelToken); }
+                catch (OperationCanceledException) { Cancelled = true; }
+            }
+
+            public override TGTask OnEnterAsync(IProcedureModule module)
+                => _enterTcs?.Task ?? TGTask.CompletedTask;
+
+            public override TGTask OnExitAsync(IProcedureModule module)
+            {
+                ExitAsyncCount++;
+                return _exitTcs?.Task ?? TGTask.CompletedTask;
+            }
+
+            public override void OnExit(IProcedureModule module)
+            {
+                ExitCalled = true;
+                base.OnExit(module);
+            }
         }
 
         private sealed class ThrowingEnterAsyncProc : AsyncProcedureBase

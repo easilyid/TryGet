@@ -1,5 +1,4 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
 
 namespace TryGet.SourceGenerator
 {
@@ -10,7 +9,7 @@ namespace TryGet.SourceGenerator
     /// 开发者写错时无任何编译期反馈、只能在运行时发现「没注册上」。这里改为 <see cref="ReportDiagnostic"/>
     /// （带 Location，IDE 直接红线），来源参考 AlicizaX UIMetaSourceGenerator。
     ///
-    /// 诊断 ID 段：TG0001-TG0003 = [Module]；TG0004-TG0006 = [EventHandler]。
+    /// 诊断 ID 段：TG0001-TG0003 / TG0007 = [Module]；TG0004-TG0006 = [EventHandler]。
     /// </summary>
     internal static class GeneratorDiagnostics
     {
@@ -34,6 +33,12 @@ namespace TryGet.SourceGenerator
             "[Module] 标记的类型未实现其声明的服务接口 '{0}'，生成的 Register 调用将无法编译",
             Category, DiagnosticSeverity.Error, isEnabledByDefault: true);
 
+        public static readonly DiagnosticDescriptor ModuleMissingPublicParameterlessConstructor = new(
+            "TG0007",
+            "[Module] 标记的类型必须有 public 无参构造器",
+            "[Module] 标记的类型 '{0}' 必须有 public 无参构造器，生成器需要用 new T() 创建 Module 实例",
+            Category, DiagnosticSeverity.Error, isEnabledByDefault: true);
+
         public static readonly DiagnosticDescriptor EventHandlerNotStatic = new(
             "TG0004",
             "[EventHandler] 方法必须是 static",
@@ -54,44 +59,24 @@ namespace TryGet.SourceGenerator
     }
 
     /// <summary>
-    /// 可缓存的位置信息。不持有 <see cref="SyntaxNode"/> / <see cref="ISymbol"/> / <see cref="Location"/>
-    /// 引用（那些会锁定 Compilation、破坏 incremental 缓存），仅存值类型字段，在输出阶段重建 Location。
+    /// 诊断信息由 transform 阶段产出、在 RegisterSourceOutput 阶段经 <see cref="ToDiagnostic"/> 还原并报告。
+    /// 诊断必须保留 Roslyn 原始 source <see cref="Location"/>；只用 file path/span 重建会变成 external
+    /// file location，IDE 无法把 TG0001-TG0006 稳定标到用户源码。
     /// </summary>
-    internal readonly record struct LocationInfo(string FilePath, TextSpan TextSpan, LinePositionSpan LineSpan)
-    {
-        public Location ToLocation() => Location.Create(FilePath, TextSpan, LineSpan);
-
-        public static LocationInfo? From(SyntaxNode? node)
-        {
-            if (node is null) return null;
-            return From(node.GetLocation());
-        }
-
-        public static LocationInfo? From(ISymbol? symbol)
-        {
-            if (symbol is null) return null;
-            foreach (var loc in symbol.Locations)
-            {
-                var info = From(loc);
-                if (info is not null) return info;
-            }
-            return null;
-        }
-
-        private static LocationInfo? From(Location location)
-        {
-            if (location.SourceTree is null) return null;
-            return new LocationInfo(location.SourceTree.FilePath, location.SourceSpan, location.GetLineSpan().Span);
-        }
-    }
-
-    /// <summary>
-    /// 可缓存的诊断信息（descriptor 引用稳定 + LocationInfo 值相等 + 单字符串参数），
-    /// 由 transform 阶段产出、在 RegisterSourceOutput 阶段经 <see cref="ToDiagnostic"/> 还原并报告。
-    /// </summary>
-    internal readonly record struct DiagnosticInfo(DiagnosticDescriptor Descriptor, LocationInfo? Location, string MessageArg)
+    internal readonly record struct DiagnosticInfo(DiagnosticDescriptor Descriptor, Location Location, string MessageArg)
     {
         public Diagnostic ToDiagnostic() =>
-            Diagnostic.Create(Descriptor, Location?.ToLocation() ?? Microsoft.CodeAnalysis.Location.None, MessageArg);
+            Diagnostic.Create(Descriptor, Location ?? Microsoft.CodeAnalysis.Location.None, MessageArg);
+
+        public static Location GetSourceLocation(ISymbol symbol)
+        {
+            if (symbol is null) return Microsoft.CodeAnalysis.Location.None;
+            foreach (var location in symbol.Locations)
+            {
+                if (location.SourceTree is not null)
+                    return location;
+            }
+            return Microsoft.CodeAnalysis.Location.None;
+        }
     }
 }

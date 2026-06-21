@@ -27,14 +27,21 @@ namespace TryGet.Async
         private long _frameCount;
         private float _elapsedTime;         // Scaled time（受 Time.timeScale 影响）
         private float _unscaledElapsedTime; // C3：Unscaled time（真实时间）
+        private float _fixedElapsedTime;
+        private float _fixedUnscaledElapsedTime;
 
         // 用于基于 Phase 顺序判断帧边界。
         // 规则：
         // - Early -> Fixed -> Update -> Late -> End 的完整单调序列里，只在第一个被调用的 Phase 里递增一次；
+        // - Unity 真实顺序可能是 Fixed -> Early(由 TryGetMonoEntry 在 Update 开头模拟)，这仍视为同一帧；
         // - 同一 Phase 连续重复调用（例如测试直接多次调用 Update）视为每次进入新帧；
+        // - 例外：Unity 一帧内可能连续多次 FixedUpdate，Fixed 时间应累加，但 FrameCount 仍只递增一次；
         // - Phase 顺序回退或回到更早的 Phase（例如 EndOfFrame 后再次 Update）也视为进入新帧。
-        // 这样可以兼容完整帧、部分帧和重复 Update 调用，同时保持实现最小化。
+        // 这样可以兼容完整帧、Unity Fixed-before-Update、部分帧和重复 Update 调用。
         private FramePhase _lastProcessedPhase = FramePhase.EndOfFrame;
+        private bool _hasProcessedAnyPhase;
+        private bool _currentFrameStartedWithFixedUpdate;
+        private bool _lastEndOfFrameFollowedLateUpdate;
 
         // Phase 队列：每个 Phase 维护独立的 Yield/Delay/FrameWait 队列
         private readonly Dictionary<FramePhase, YieldQueues> _yieldQueuesByPhase;
@@ -174,8 +181,13 @@ namespace TryGet.Async
 
             _elapsedTime = 0;
             _unscaledElapsedTime = 0;
+            _fixedElapsedTime = 0;
+            _fixedUnscaledElapsedTime = 0;
             _frameCount = 0;
             _lastProcessedPhase = FramePhase.EndOfFrame;
+            _hasProcessedAnyPhase = false;
+            _currentFrameStartedWithFixedUpdate = false;
+            _lastEndOfFrameFollowedLateUpdate = false;
         }
 
         private static void CancelYieldList(List<YieldItem> list)
@@ -225,9 +237,7 @@ namespace TryGet.Async
             }
             else
             {
-                float dueTime = timeMode == TimeMode.Scaled
-                    ? _elapsedTime + seconds
-                    : _unscaledElapsedTime + seconds;
+                float dueTime = GetCurrentTime(phase, timeMode) + seconds;
                 _delayQueuesByPhase[phase].Add(new DelayedEntry(tcs, dueTime, timeMode, reg));
             }
             return task;
@@ -309,13 +319,31 @@ namespace TryGet.Async
             // - 完整帧循环中 Phase 单调递增，只在 EarlyUpdate 递增一次。
             // - 直接重复调用同一 Phase（如测试直接调用 Update）视为每次进入新帧。
             // - Phase 顺序回退（如 EndOfFrame 后再次 Update）视为新帧。
-            if (phase <= _lastProcessedPhase)
+            bool startsNewFrame = StartsNewFrame(phase);
+            if (startsNewFrame)
             {
                 _frameCount++;
+                _currentFrameStartedWithFixedUpdate = phase == FramePhase.FixedUpdate;
+            }
+            if (phase == FramePhase.FixedUpdate)
+            {
+                _fixedElapsedTime += deltaTime;
+                _fixedUnscaledElapsedTime += unscaledDeltaTime;
+            }
+            else if (ShouldAccumulateElapsedTime(phase, startsNewFrame))
+            {
                 _elapsedTime += deltaTime;
                 _unscaledElapsedTime += unscaledDeltaTime;
             }
+            bool endOfFrameFollowedLateUpdate =
+                phase == FramePhase.EndOfFrame &&
+                _lastProcessedPhase == FramePhase.LateUpdate;
             _lastProcessedPhase = phase;
+            _hasProcessedAnyPhase = true;
+            if (phase == FramePhase.EndOfFrame)
+                _lastEndOfFrameFollowedLateUpdate = endOfFrameFollowedLateUpdate;
+            if (phase == FramePhase.EarlyUpdate)
+                _currentFrameStartedWithFixedUpdate = false;
 
             // 1. 处理 Yield 队列
             ProcessYieldQueue(phase);
@@ -325,6 +353,51 @@ namespace TryGet.Async
 
             // 3. 处理 FrameWait 队列
             ProcessFrameWaitQueue(phase);
+        }
+
+        private bool StartsNewFrame(FramePhase phase)
+        {
+            if (!_hasProcessedAnyPhase)
+                return true;
+
+            if (_currentFrameStartedWithFixedUpdate &&
+                phase == FramePhase.EarlyUpdate)
+            {
+                return false;
+            }
+
+            if (_currentFrameStartedWithFixedUpdate &&
+                _lastProcessedPhase == FramePhase.FixedUpdate &&
+                phase == FramePhase.FixedUpdate)
+            {
+                return false;
+            }
+
+            if (_lastProcessedPhase == FramePhase.EndOfFrame &&
+                phase == FramePhase.LateUpdate &&
+                !_lastEndOfFrameFollowedLateUpdate)
+            {
+                return false;
+            }
+
+            return phase <= _lastProcessedPhase;
+        }
+
+        private bool ShouldAccumulateElapsedTime(FramePhase phase, bool startsNewFrame)
+        {
+            if (phase == FramePhase.FixedUpdate)
+                return false;
+
+            return startsNewFrame ||
+                   (_currentFrameStartedWithFixedUpdate && phase == FramePhase.EarlyUpdate);
+        }
+
+        private float GetCurrentTime(FramePhase phase, TimeMode timeMode)
+        {
+            if (phase == FramePhase.FixedUpdate)
+                return timeMode == TimeMode.Scaled ? _fixedElapsedTime : _fixedUnscaledElapsedTime;
+
+            return timeMode == TimeMode.Scaled ? _elapsedTime : _unscaledElapsedTime;
         }
 
         private void ProcessYieldQueue(FramePhase phase)
@@ -368,7 +441,7 @@ namespace TryGet.Async
                     continue;
                 }
 
-                float currentTime = e.TimeMode == TimeMode.Scaled ? _elapsedTime : _unscaledElapsedTime;
+                float currentTime = GetCurrentTime(phase, e.TimeMode);
                 if (e.DueTime <= currentTime)
                 {
                     e.Reg.Dispose();

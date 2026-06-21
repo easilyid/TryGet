@@ -43,6 +43,52 @@ namespace TryGet.Tests
         }
 
         [Test]
+        public void GenericForget_CompletedFaultedTask_RaisesUnobservedAndReturnsBodyToPool()
+        {
+            TGTaskPool.ClearGeneric<int>();
+            Exception unobserved = null;
+            Action<Exception> h = ex => unobserved = ex;
+            TGTaskScheduler.UnobservedException += h;
+            try
+            {
+                var task = TGTask<int>.FromException(new InvalidOperationException("x"));
+
+                Assert.AreEqual(0, TGTaskPool.PooledCountOf<int>());
+                task.Forget();
+
+                Assert.IsInstanceOf<InvalidOperationException>(unobserved);
+                Assert.AreEqual(1, TGTaskPool.PooledCountOf<int>(),
+                    "TGTask<T>.Forget 应消费异常并归还泛型 body");
+            }
+            finally { TGTaskScheduler.UnobservedException -= h; }
+        }
+
+        [Test]
+        public void GenericForget_PendingFaultedTask_RaisesUnobservedLaterAndReturnsBodyToPool()
+        {
+            TGTaskPool.ClearGeneric<int>();
+            Exception unobserved = null;
+            Action<Exception> h = ex => unobserved = ex;
+            TGTaskScheduler.UnobservedException += h;
+            try
+            {
+                var tcs = new TGTaskCompletionSource<int>();
+                var task = tcs.Task;
+
+                task.Forget();
+                Assert.IsNull(unobserved);
+                Assert.AreEqual(0, TGTaskPool.PooledCountOf<int>());
+
+                tcs.SetException(new InvalidOperationException("later"));
+
+                Assert.IsInstanceOf<InvalidOperationException>(unobserved);
+                Assert.AreEqual(1, TGTaskPool.PooledCountOf<int>(),
+                    "pending TGTask<T>.Forget 应在后续完成时消费异常并归还 body");
+            }
+            finally { TGTaskScheduler.UnobservedException -= h; }
+        }
+
+        [Test]
         public void TcsReturn_AfterConsumerReturned_IsNoOp_NoDoubleReturn()
         {
             var tcs = new TGTaskCompletionSource();

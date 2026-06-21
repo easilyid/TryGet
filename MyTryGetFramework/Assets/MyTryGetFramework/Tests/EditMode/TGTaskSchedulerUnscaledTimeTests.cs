@@ -132,5 +132,25 @@ namespace TryGet.Tests
 
             Assert.IsTrue(task.IsCompleted);
         }
+
+        [Test]
+        public void Delay_FixedUpdate_UnscaledTimeMode_UsesFixedUnscaledTime()
+        {
+            var task = _scheduler.Delay(0.03f, FramePhase.FixedUpdate, TimeMode.Unscaled);
+
+            _scheduler.Update(1.0f, 10.0f);
+            Assert.IsFalse(task.IsCompleted,
+                "FixedUpdate unscaled delay must not use Update-phase unscaled elapsed time.");
+
+            _scheduler.FixedUpdate(10.0f, 0.01f);
+            Assert.IsFalse(task.IsCompleted,
+                "FixedUpdate unscaled delay must not use scaled fixed elapsed time.");
+
+            _scheduler.FixedUpdate(10.0f, 0.01f);
+            Assert.IsFalse(task.IsCompleted);
+
+            _scheduler.FixedUpdate(10.0f, 0.01f);
+            Assert.IsTrue(task.IsCompleted);
+        }
     }
 }

@@ -34,6 +34,46 @@ namespace App
         }
 
         [Test]
+        public void ModuleManifest_NestedNamespace_GeneratesFullyQualifiedNames()
+        {
+            const string src = @"
+namespace App.Sub.Deep
+{
+    public interface IFoo : TryGet.IModule {}
+
+    [TryGet.Module(typeof(IFoo))]
+    public sealed class Foo : IFoo {}
+}";
+            var result = GeneratorTestHelper.Run(new ModuleManifestGenerator(), src);
+
+            Assert.That(result.CompilationErrors, Is.Empty, result.AllGeneratedText);
+            Assert.That(result.AllGeneratedText,
+                Does.Contain("host.Register<global::App.Sub.Deep.IFoo>(new global::App.Sub.Deep.Foo())"),
+                "嵌套命名空间下的模块注册必须生成完全限定名，避免 Unity 工程常见 namespace 层级下解析漂移。");
+        }
+
+        [Test]
+        public void ModuleManifest_UnityBuild_UsesRuntimeInitializeAndModuleInitializer()
+        {
+            const string src = @"
+namespace App
+{
+    public interface IFoo : TryGet.IModule {}
+
+    [TryGet.Module(typeof(IFoo))]
+    public sealed class Foo : IFoo {}
+}";
+            var result = GeneratorTestHelper.Run(new ModuleManifestGenerator(), src, "UNITY_5_3_OR_NEWER");
+
+            Assert.That(result.CompilationErrors, Is.Empty, result.AllGeneratedText);
+            Assert.That(result.AllGeneratedText, Does.Contain("RuntimeInitializeOnLoadMethod"));
+            Assert.That(result.AllGeneratedText, Does.Contain("ModuleInitializer"));
+            Assert.That(result.AllGeneratedText, Does.Contain("if (_initialized && IsRegistered()) return;"),
+                "Registry 被测试清空后，Unity runtime init 再次触发时应允许重新注册。");
+            Assert.That(result.AllGeneratedText, Does.Contain("global::TryGet.ModuleRegistry.Snapshot()"));
+        }
+
+        [Test]
         public void ModuleManifest_NoModules_GeneratesNothing()
         {
             const string src = @"
@@ -65,6 +105,39 @@ namespace App
                 "应生成 bus.Subscribe<事件>(处理方法)");
             Assert.That(result.CompilationErrors, Is.Empty,
                 "生成代码必须编译通过：\n" + result.AllGeneratedText);
+        }
+
+        [Test]
+        public void EventHandler_UnityBuild_UsesRuntimeInitializeAndModuleInitializer()
+        {
+            const string src = @"
+namespace App
+{
+    public struct DamageEvent { public int Amount; }
+
+    public static class Handlers
+    {
+        [TryGet.EventHandler]
+        public static void OnDamage(DamageEvent evt) {}
+    }
+}";
+            var result = GeneratorTestHelper.Run(new EventHandlerGenerator(), src, "UNITY_5_3_OR_NEWER");
+
+            Assert.That(result.CompilationErrors, Is.Empty, result.AllGeneratedText);
+            Assert.That(result.AllGeneratedText, Does.Contain("RuntimeInitializeOnLoadMethod"));
+            Assert.That(result.AllGeneratedText, Does.Contain("ModuleInitializer"));
+            Assert.That(result.AllGeneratedText, Does.Contain("if (_initialized && IsRegistered()) return;"),
+                "Registry 被测试清空后，Unity runtime init 再次触发时应允许重新注册。");
+            Assert.That(result.AllGeneratedText, Does.Contain("global::TryGet.EventHandlerRegistry.Snapshot()"));
+        }
+
+        [Test]
+        public void ModuleInitializerSupport_GeneratesPolyfill()
+        {
+            var result = GeneratorTestHelper.Run(new ModuleInitializerSupportGenerator(), "namespace App { public sealed class Plain {} }");
+
+            Assert.That(result.CompilationErrors, Is.Empty, result.AllGeneratedText);
+            Assert.That(result.AllGeneratedText, Does.Contain("ModuleInitializerAttribute"));
         }
 
         [Test]

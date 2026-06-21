@@ -13,6 +13,8 @@ namespace TryGet.Tests
         private interface IRendererModule : IModule { }
         private interface ICameraModule : IModule { }
         private interface IPassiveModule : IModule { }
+        private interface IThrowingFrameModule : IModule { }
+        private interface IAfterThrowFrameModule : IModule { }
 
         private class RendererModule : IRendererModule, IEarlyUpdateModule, IFixedUpdateModule, IUpdateModule, ILateUpdateModule, IEndOfFrameModule
         {
@@ -223,6 +225,29 @@ namespace TryGet.Tests
             Assert.IsFalse(host.IsInitialized);
         }
 
+        [TestCase(FramePhase.EarlyUpdate)]
+        [TestCase(FramePhase.FixedUpdate)]
+        [TestCase(FramePhase.Update)]
+        [TestCase(FramePhase.LateUpdate)]
+        [TestCase(FramePhase.EndOfFrame)]
+        public void FrameDispatch_ModuleThrows_PropagatesAndSkipsLaterModules(FramePhase phase)
+        {
+            var host = new ModuleSystem();
+            var throwing = new ThrowingFrameModule { PhaseToThrow = phase };
+            var after = new AfterThrowFrameModule();
+
+            host.Register<IThrowingFrameModule>(throwing);
+            host.Register<IAfterThrowFrameModule>(after);
+            host.Initialize();
+
+            var ex = Assert.Throws<InvalidOperationException>(() => DispatchFrame(host, phase));
+
+            StringAssert.Contains(phase.ToString(), ex.Message);
+            Assert.AreEqual(1, throwing.CallCount);
+            Assert.AreEqual(0, after.CountFor(phase));
+            Assert.IsTrue(host.IsInitialized);
+        }
+
         [Test]
         public void Update_OrderMatchesInitOrder()
         {
@@ -286,6 +311,95 @@ namespace TryGet.Tests
             public void Shutdown()
             {
                 throw new InvalidOperationException("shutdown failed");
+            }
+        }
+
+        private sealed class ThrowingFrameModule :
+            IThrowingFrameModule,
+            IEarlyUpdateModule,
+            IFixedUpdateModule,
+            IUpdateModule,
+            ILateUpdateModule,
+            IEndOfFrameModule
+        {
+            public int Priority => 0;
+            public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
+            public FramePhase PhaseToThrow { get; set; }
+            public int CallCount { get; private set; }
+            public void OnInit(IModuleSystem host) { }
+            public void Shutdown() { }
+            public void EarlyUpdate(float dt, float unscaledDt) => Dispatch(FramePhase.EarlyUpdate);
+            public void FixedUpdate(float dt, float unscaledDt) => Dispatch(FramePhase.FixedUpdate);
+            public void Update(float dt, float unscaledDt) => Dispatch(FramePhase.Update);
+            public void LateUpdate(float dt, float unscaledDt) => Dispatch(FramePhase.LateUpdate);
+            public void EndOfFrame(float dt, float unscaledDt) => Dispatch(FramePhase.EndOfFrame);
+
+            private void Dispatch(FramePhase phase)
+            {
+                CallCount++;
+                if (phase == PhaseToThrow)
+                    throw new InvalidOperationException("frame dispatch failed: " + phase);
+            }
+        }
+
+        private sealed class AfterThrowFrameModule :
+            IAfterThrowFrameModule,
+            IEarlyUpdateModule,
+            IFixedUpdateModule,
+            IUpdateModule,
+            ILateUpdateModule,
+            IEndOfFrameModule
+        {
+            public int Priority => 10;
+            public IReadOnlyList<Type> DependsOn => Array.Empty<Type>();
+            public int EarlyUpdateCount { get; private set; }
+            public int FixedUpdateCount { get; private set; }
+            public int UpdateCount { get; private set; }
+            public int LateUpdateCount { get; private set; }
+            public int EndOfFrameCount { get; private set; }
+            public void OnInit(IModuleSystem host) { }
+            public void Shutdown() { }
+            public void EarlyUpdate(float dt, float unscaledDt) { EarlyUpdateCount++; }
+            public void FixedUpdate(float dt, float unscaledDt) { FixedUpdateCount++; }
+            public void Update(float dt, float unscaledDt) { UpdateCount++; }
+            public void LateUpdate(float dt, float unscaledDt) { LateUpdateCount++; }
+            public void EndOfFrame(float dt, float unscaledDt) { EndOfFrameCount++; }
+
+            public int CountFor(FramePhase phase)
+            {
+                switch (phase)
+                {
+                    case FramePhase.EarlyUpdate: return EarlyUpdateCount;
+                    case FramePhase.FixedUpdate: return FixedUpdateCount;
+                    case FramePhase.Update: return UpdateCount;
+                    case FramePhase.LateUpdate: return LateUpdateCount;
+                    case FramePhase.EndOfFrame: return EndOfFrameCount;
+                    default: throw new ArgumentOutOfRangeException(nameof(phase), phase, null);
+                }
+            }
+        }
+
+        private static void DispatchFrame(IModuleSystem host, FramePhase phase)
+        {
+            switch (phase)
+            {
+                case FramePhase.EarlyUpdate:
+                    host.EarlyUpdate(0.016f, 0.016f);
+                    break;
+                case FramePhase.FixedUpdate:
+                    host.FixedUpdate(0.016f, 0.016f);
+                    break;
+                case FramePhase.Update:
+                    host.Update(0.016f, 0.016f);
+                    break;
+                case FramePhase.LateUpdate:
+                    host.LateUpdate(0.016f, 0.016f);
+                    break;
+                case FramePhase.EndOfFrame:
+                    host.EndOfFrame(0.016f, 0.016f);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(phase), phase, null);
             }
         }
     }

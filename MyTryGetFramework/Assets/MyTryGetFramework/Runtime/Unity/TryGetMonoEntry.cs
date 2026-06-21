@@ -61,17 +61,33 @@ namespace TryGet.Unity
         /// <summary>子类可 override 控制 DontDestroyOnLoad 行为。默认 true。</summary>
         protected virtual bool MakeDontDestroyOnLoad => true;
 
+        /// <summary>
+        /// 初始化当前入口实例。同一 MonoBehaviour 实例若被重复进入 Awake，保持现有 Host 并视为 no-op；
+        /// 需要重启框架时应销毁旧组件/对象后创建新实例。
+        /// </summary>
         protected virtual void Awake()
         {
-            if (MakeDontDestroyOnLoad)
-                DontDestroyOnLoad(gameObject);
+            if (Host != null)
+                return;
 
-            Host = GameLauncher.CreateHost(Options);
-            Setup(Host);
-            Host.Initialize();
+            try
+            {
+                Host = GameLauncher.CreateHost(Options);
+                Setup(Host);
+                Host.Initialize();
 
-            // 启动 EndOfFrame 协程驱动
-            StartCoroutine(EndOfFrameCoroutine());
+                if (MakeDontDestroyOnLoad)
+                    DontDestroyOnLoad(gameObject);
+
+                // 启动 EndOfFrame 协程驱动
+                StartCoroutine(EndOfFrameCoroutine());
+            }
+            catch
+            {
+                Host?.Shutdown();
+                Host = null;
+                throw;
+            }
         }
 
         protected virtual void FixedUpdate()
@@ -98,14 +114,27 @@ namespace TryGet.Unity
             while (Host != null)
             {
                 yield return new UnityEngine.WaitForEndOfFrame();
-                Host?.EndOfFrame(Time.deltaTime, Time.unscaledDeltaTime);
+                try
+                {
+                    Host?.EndOfFrame(Time.deltaTime, Time.unscaledDeltaTime);
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogException(ex);
+                }
             }
         }
 
         protected virtual void OnDestroy()
         {
-            Host?.Shutdown();
-            Host = null;
+            try
+            {
+                Host?.Shutdown();
+            }
+            finally
+            {
+                Host = null;
+            }
         }
     }
 }

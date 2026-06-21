@@ -9,6 +9,7 @@ namespace TryGet.Async
     /// - 单线程模型（V0.6 不支持多线程；测试通过 ThrowIfNotMainThread 检测留 V0.6 后续 Iter 加）。
     /// - 每个 body 类型（非泛型 <see cref="TGTaskBody"/> + 每个泛型实例 <c>TGTaskBody&lt;T&gt;</c>）一个独立 Stack。
     /// - Pool 满时不再池化（直接 GC），防止内存膨胀。
+    /// - 重复 Return 同一 body 时保持 no-op，确保池内不会出现同一实例的多份引用。
     /// - Rent / Return internal，仅由 builder / tcs 调用；公开诊断 API <see cref="PooledCount"/> / <see cref="PooledCountOf{T}"/>。
     ///
     /// 用户使用模式：通常不直接接触 TGTaskPool。V2.0 C11 起 Builder 与 Manual body 都在
@@ -24,19 +25,27 @@ namespace TryGet.Async
         public static int MaxPoolSize { get; set; } = 64;
 
         private static readonly Stack<TGTaskBody> _bodies = new Stack<TGTaskBody>();
+        private static readonly HashSet<TGTaskBody> _inPool =
+            new HashSet<TGTaskBody>(ReferenceComparer<TGTaskBody>.Instance);
 
         internal static TGTaskBody Rent()
         {
             if (_bodies.Count > 0)
-                return _bodies.Pop();
+            {
+                var body = _bodies.Pop();
+                _inPool.Remove(body);
+                return body;
+            }
             return new TGTaskBody();
         }
 
         internal static void Return(TGTaskBody body)
         {
             if (body == null) return;
+            if (_inPool.Contains(body)) return;
             if (_bodies.Count >= MaxPoolSize) return;
             body.Reset();
+            _inPool.Add(body);
             _bodies.Push(body);
         }
 
@@ -48,20 +57,28 @@ namespace TryGet.Async
         private static class TypedPool<T>
         {
             public static readonly Stack<TGTaskBody<T>> Bodies = new Stack<TGTaskBody<T>>();
+            public static readonly HashSet<TGTaskBody<T>> InPool =
+                new HashSet<TGTaskBody<T>>(ReferenceComparer<TGTaskBody<T>>.Instance);
         }
 
         internal static TGTaskBody<T> Rent<T>()
         {
             if (TypedPool<T>.Bodies.Count > 0)
-                return TypedPool<T>.Bodies.Pop();
+            {
+                var body = TypedPool<T>.Bodies.Pop();
+                TypedPool<T>.InPool.Remove(body);
+                return body;
+            }
             return new TGTaskBody<T>();
         }
 
         internal static void Return<T>(TGTaskBody<T> body)
         {
             if (body == null) return;
+            if (TypedPool<T>.InPool.Contains(body)) return;
             if (TypedPool<T>.Bodies.Count >= MaxPoolSize) return;
             body.Reset();
+            TypedPool<T>.InPool.Add(body);
             TypedPool<T>.Bodies.Push(body);
         }
 
@@ -71,12 +88,23 @@ namespace TryGet.Async
         public static void ClearAll()
         {
             _bodies.Clear();
+            _inPool.Clear();
         }
 
         /// <summary>清空指定泛型池（测试用）。</summary>
         public static void ClearGeneric<T>()
         {
             TypedPool<T>.Bodies.Clear();
+            TypedPool<T>.InPool.Clear();
+        }
+
+        private sealed class ReferenceComparer<TBody> : IEqualityComparer<TBody>
+            where TBody : class
+        {
+            public static readonly ReferenceComparer<TBody> Instance = new ReferenceComparer<TBody>();
+            public bool Equals(TBody x, TBody y) => ReferenceEquals(x, y);
+            public int GetHashCode(TBody obj) =>
+                System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
         }
     }
 }

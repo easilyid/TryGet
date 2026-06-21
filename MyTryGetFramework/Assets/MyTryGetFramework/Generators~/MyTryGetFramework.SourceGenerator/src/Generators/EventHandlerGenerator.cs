@@ -70,7 +70,7 @@ namespace TryGet.SourceGenerator
         }
 
         private static EventHandlerExtraction Fail(DiagnosticDescriptor descriptor, ISymbol locationSymbol, string messageArg)
-            => new(null, new DiagnosticInfo(descriptor, LocationInfo.From(locationSymbol), messageArg));
+            => new(null, new DiagnosticInfo(descriptor, DiagnosticInfo.GetSourceLocation(locationSymbol), messageArg));
 
         private static string GenerateManifest(string safeAsmId, ImmutableArray<EventHandlerInfo> handlers, string assemblyName)
         {
@@ -90,7 +90,7 @@ namespace TryGet.SourceGenerator
             sb.AppendLine("        [global::System.Runtime.CompilerServices.ModuleInitializer]");
             sb.AppendLine("        public static void Initialize()");
             sb.AppendLine("        {");
-            sb.AppendLine("            if (_initialized) return;");
+            sb.AppendLine("            if (_initialized && IsRegistered()) return;");
             sb.AppendLine("            _initialized = true;");
             sb.AppendLine();
 
@@ -127,6 +127,18 @@ namespace TryGet.SourceGenerator
             }
 
             sb.AppendLine("            });");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private static bool IsRegistered()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            var snapshot = global::TryGet.EventHandlerRegistry.Snapshot();");
+            sb.AppendLine("            for (int i = 0; i < snapshot.Count; i++)");
+            sb.AppendLine("            {");
+            sb.Append("                if (snapshot[i].SourceAssembly == ").Append('"').Append(assemblyName).AppendLine("\")");
+            sb.AppendLine("                    return true;");
+            sb.AppendLine("            }");
+            sb.AppendLine();
+            sb.AppendLine("            return false;");
             sb.AppendLine("        }");
             sb.AppendLine("    }");
             sb.AppendLine("}");

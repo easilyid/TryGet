@@ -15,7 +15,8 @@ namespace TryGet.SourceGenerator
     /// - <see cref="ForAttributeWithMetadataName"/> 入口，避免遍历整个语法树
     /// - <see cref="ModuleInfo"/> 是 value-equatable record（关键 incrementality 性能优化）
     /// - <c>[ModuleInitializer]</c>（C# 9.0+）+ <c>[RuntimeInitializeOnLoadMethod]</c>（Unity）
-    ///   dual-trigger，<c>_initialized</c> flag 防重
+    ///   dual-trigger，<c>_initialized</c> flag 防重；PlayMode 测试程序集不稳定触发 Unity runtime init，
+    ///   因此 Unity 分支也保留 ModuleInitializer 兜底
     /// - <c>[UnityEngine.Scripting.Preserve]</c> 防 IL2CPP strip
     /// - 没有任何 [Module] 时不生成 Manifest 文件（noise-free）
     /// </summary>
@@ -85,13 +86,17 @@ namespace TryGet.SourceGenerator
                 return Fail(GeneratorDiagnostics.ModuleDoesNotImplementService, classSymbol,
                     serviceTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
 
+            if (!HasPublicParameterlessConstructor(classSymbol))
+                return Fail(GeneratorDiagnostics.ModuleMissingPublicParameterlessConstructor, classSymbol,
+                    classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+
             string classFullName = classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             string serviceFullName = serviceTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             return new ModuleExtraction(new ModuleInfo(classFullName, serviceFullName), null);
         }
 
         private static ModuleExtraction Fail(DiagnosticDescriptor descriptor, ISymbol locationSymbol, string messageArg)
-            => new(null, new DiagnosticInfo(descriptor, LocationInfo.From(locationSymbol), messageArg));
+            => new(null, new DiagnosticInfo(descriptor, DiagnosticInfo.GetSourceLocation(locationSymbol), messageArg));
 
         private static bool ImplementsInterface(INamedTypeSymbol type, INamedTypeSymbol iface)
         {
@@ -100,6 +105,18 @@ namespace TryGet.SourceGenerator
                 if (SymbolEqualityComparer.Default.Equals(i, iface))
                     return true;
             }
+            return false;
+        }
+
+        private static bool HasPublicParameterlessConstructor(INamedTypeSymbol type)
+        {
+            foreach (var ctor in type.InstanceConstructors)
+            {
+                if (ctor.Parameters.Length == 0 &&
+                    ctor.DeclaredAccessibility == Accessibility.Public)
+                    return true;
+            }
+
             return false;
         }
 
@@ -121,7 +138,7 @@ namespace TryGet.SourceGenerator
             sb.AppendLine("        [global::System.Runtime.CompilerServices.ModuleInitializer]");
             sb.AppendLine("        public static void Initialize()");
             sb.AppendLine("        {");
-            sb.AppendLine("            if (_initialized) return;");
+            sb.AppendLine("            if (_initialized && IsRegistered()) return;");
             sb.AppendLine("            _initialized = true;");
             sb.AppendLine();
 
@@ -149,6 +166,18 @@ namespace TryGet.SourceGenerator
             }
 
             sb.AppendLine("            });");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        private static bool IsRegistered()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            var snapshot = global::TryGet.ModuleRegistry.Snapshot();");
+            sb.AppendLine("            for (int i = 0; i < snapshot.Count; i++)");
+            sb.AppendLine("            {");
+            sb.Append("                if (snapshot[i].SourceAssembly == ").Append('"').Append(assemblyName).AppendLine("\")");
+            sb.AppendLine("                    return true;");
+            sb.AppendLine("            }");
+            sb.AppendLine();
+            sb.AppendLine("            return false;");
             sb.AppendLine("        }");
             sb.AppendLine("    }");
             sb.AppendLine("}");
